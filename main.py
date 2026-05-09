@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 from keep_alive import keep_alive
 from voice_task import voice_keepalive_loop, check_voice_status
+from feed_task import start_feed_task
 from react_task import process_channel, save_checkpoints, channel_checkpoints
 
 prefix = "!"
@@ -62,6 +63,7 @@ async def on_ready():
     # Khởi động vòng lặp kiểm tra voice nếu nó chưa chạy
     if not voice_keepalive_loop.is_running():
         voice_keepalive_loop.start(bot)
+    start_feed_task(bot)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
