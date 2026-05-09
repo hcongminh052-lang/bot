@@ -65,7 +65,7 @@ async def on_ready():
     voice_task.GLOBAL_BOT = bot 
     
     if not voice_task.voice_keepalive_loop.is_running():
-        voice_task.voice_keepalive_loop.start() # Không truyền bot vào đây nữa
+        voice_task.voice_keepalive_loop.start()
         
     start_feed_task(bot)
 
