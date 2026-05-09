@@ -6,7 +6,7 @@ HUB_CHANNEL_ID = 1490301863692865597
 GLOBAL_BOT = None # Thêm biến này
 
 @tasks.loop(seconds=30)
-async def voice_keepalive_loop(): # Bỏ tham số bot ở đây
+async def voice_keepalive_loop():
     bot = GLOBAL_BOT
     if not bot or not bot.is_ready():
         return
