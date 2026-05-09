@@ -60,9 +60,13 @@ async def cmd(ctx):
 @bot.event
 async def on_ready():
     print(f'✅ Bot {bot.user} đã lên sóng!')
-    # Khởi động vòng lặp kiểm tra voice nếu nó chưa chạy
-    if not voice_keepalive_loop.is_running():
-        voice_keepalive_loop.start(bot)
+    
+    # Gán bot vào biến toàn cục của voice_task để loop sử dụng được
+    voice_task.GLOBAL_BOT = bot 
+    
+    if not voice_task.voice_keepalive_loop.is_running():
+        voice_task.voice_keepalive_loop.start() # Không truyền bot vào đây nữa
+        
     start_feed_task(bot)
 
 @bot.event
