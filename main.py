@@ -5,6 +5,7 @@ import random
 import signal
 import traceback
 import discord
+import voice_task
 from discord.ext import commands
 from keep_alive import keep_alive
 from voice_task import voice_keepalive_loop, check_voice_status
