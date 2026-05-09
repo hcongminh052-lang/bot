@@ -72,7 +72,6 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # Theo dõi trạng thái voice của chính bot
     await check_voice_status(bot, member, before, after)
 
 @bot.command()
