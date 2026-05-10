@@ -61,8 +61,7 @@ async def cmd(ctx):
 @bot.event
 async def on_ready():
     print(f'✅ Bot {bot.user} đã lên sóng!')
-    
-    # 1. Gán bot vào biến GLOBAL
+
     voice_task.GLOBAL_BOT = bot 
     
     # 2. Khởi động vòng lặp
