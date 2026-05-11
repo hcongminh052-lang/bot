@@ -62,9 +62,6 @@ async def cmd(ctx):
 async def on_ready():
     print(f'✅ Bot {bot.user} đã lên sóng!')
 
-    voice_task.GLOBAL_BOT = bot 
-    
-    # 2. Khởi động vòng lặp
     if not voice_task.voice_keepalive_loop.is_running():
         voice_task.voice_keepalive_loop.start()
         print("🚀 [System] Đã kích hoạt vòng lặp Voice Keepalive")
