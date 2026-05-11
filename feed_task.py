@@ -4,7 +4,6 @@ import asyncio
 import random
 from datetime import datetime
 
-# ID kênh bạn vừa cung cấp
 FEED_CHANNEL_ID = 1214564167520886804 
 
 @tasks.loop(hours=8)
