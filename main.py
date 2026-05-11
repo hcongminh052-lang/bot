@@ -10,7 +10,6 @@ from discord.ext import commands
 from keep_alive import keep_alive
 from voice_task import voice_keepalive_loop, check_voice_status
 from feed_task import start_feed_task
-from react_task import process_channel, save_checkpoints, channel_checkpoints
 
 prefix = "!"
 intents = discord.Intents.all()
@@ -20,12 +19,6 @@ bot = commands.Bot(command_prefix=prefix,
                    case_insensitive=True,
                    intents=intents,
                    self_bot = True)
-
-def shutdown_handler():
-    print("Saving checkpoint before exit...")
-    save_checkpoints(channel_checkpoints)
-
-signal.signal(signal.SIGINT, lambda s, f: shutdown_handler())
 
 def listToString(s):
     str1 = ""
@@ -192,121 +185,6 @@ async def deletmessage(ctx, soluong):
         await ctx.send(f":wastebasket: Đã xoá {demtn} tin nhắn!")
     else:
         await ctx.send("Warning: Vượt quá giới hạn xoá tin nhắn")
-
-last_message_id = None
-@bot.command(aliases = ["or"])
-async def oldreact(ctx):
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-    react_config = {
-        1229716511401316404: [
-            1194533745286451271,
-            1194533743109611550,
-            1194196518228463646,
-            1194196538067529802,
-            1194200700696137748,
-            1286272027141083137
-        ],
-        1229716774195433472: [
-            1194533745286451271,
-            1194533743109611550,
-            1194196518228463646,
-            1194196538067529802,
-            1194200700696137748,
-            1286272027141083137,
-            "❤️",
-            1194196216985169951,
-            1194196752803315772,
-            1195014108085489866,
-            1211715677497331732,
-            1279164617117143113
-        ],
-        1380893805162528878: [
-            1194533745286451271,
-            "❤️",
-            1194196216985169951,
-            1194196752803315772,
-            1195014108085489866,
-            1211715677497331732,
-            1279164617117143113
-        ],
-        1302993772006609007: [
-            1194533745286451271,
-            1194196216985169951,
-            1211715677497331732,
-            1195014108085489866,
-            1196006750403440710,
-            1196008739665358858,
-            1194281783659864114
-        ],
-        1281154949077798912: [
-            1194533745286451271,
-            1194196216985169951,
-            1211715677497331732,
-            1195014108085489866,
-            1196006750403440710,
-            1196008739665358858,
-            1194281783659864114
-        ],
-        1281155099590135878: [
-            1194533745286451271,
-            "❤️",
-            1194196216985169951,
-            1194196752803315772,
-            1195014108085489866,
-            1211715677497331732,
-            1279164617117143113
-        ],
-        1281155158922760273: [
-            1194533745286451271,
-            1194196216985169951,
-            1211715677497331732,
-            1195014108085489866,
-            1196006750403440710,
-            1196008739665358858,
-            1194281783659864114
-        ],
-        1281155174253199444: [
-            1194533745286451271,
-            "❤️",
-            1194196216985169951,
-            1194196752803315772,
-            1195014108085489866,
-            1211715677497331732,
-            1279164617117143113
-        ],
-        1281155289625923676: [
-            1194533745286451271,
-            1194196216985169951,
-            1211715677497331732,
-            1195014108085489866,
-            1196006750403440710,
-            1196008739665358858,
-            1194281783659864114
-        ],
-        1281155308684574723: [
-            1194533745286451271,
-            "❤️",
-            1194196216985169951,
-            1194196752803315772,
-            1195014108085489866,
-            1211715677497331732,
-            1279164617117143113
-        ]
-    }
-
-    print("========== FINAL FORM START ==========")
-    semaphore = asyncio.Semaphore(1)
-    async def limited_process(cid, eids):
-        async with semaphore:
-            await process_channel(bot, cid, eids)
-
-    tasks = [limited_process(cid, eids) for cid, eids in react_config.items()]
-    await asyncio.gather(*tasks)
-
-    print("========== FINAL FORM DONE ==========")
 
 @bot.command()
 async def allem(ctx):
