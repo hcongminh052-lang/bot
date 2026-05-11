@@ -1,59 +1,66 @@
 import discord
 import asyncio
 from discord.ext import tasks
-import traceback
 
-# ID kênh "Hub - Join to create"
+# ID kênh "Hub - Join to create" của bạn
 HUB_CHANNEL_ID = 1490301863692865597 
-GLOBAL_BOT = None 
 
 @tasks.loop(seconds=30)
-async def voice_keepalive_loop():
-    global GLOBAL_BOT
-    bot = GLOBAL_BOT
-    
-    if bot is None or not bot.is_ready():
+async def voice_keepalive_loop(bot):
+    """Vòng lặp chạy mỗi 30 giây để kiểm tra và giữ bot trong voice"""
+    if not bot.is_ready():
         return
 
+    hub_channel = bot.get_channel(HUB_CHANNEL_ID)
+    if not hub_channel:
+        print(f"❌ [Voice] Không tìm thấy ID kênh Hub: {HUB_CHANNEL_ID}")
+        return
+
+    # Lấy voice_client hiện tại của bot trong server chứa Hub
+    vc = discord.utils.get(bot.voice_clients, guild=hub_channel.guild)
+
     try:
-        hub_channel = bot.get_channel(HUB_CHANNEL_ID)
-        if not hub_channel:
-            print(f"❌ [Voice] Không tìm thấy kênh ID: {HUB_CHANNEL_ID}")
-            return
-
-        # Tìm voice_client trong server chứa kênh Hub
-        vc = discord.utils.get(bot.voice_clients, guild=hub_channel.guild)
-
-        # TRƯỜNG HỢP 1: Bot hoàn toàn không ở trong voice
+        # TRƯỜNG HỢP 1: Bot hoàn toàn không ở trong voice hoặc bị mất kết nối
         if vc is None or not vc.is_connected():
-            print("📡 [Voice] Bot đang ngoài voice, tiến hành kết nối vào Hub...")
+            print("📡 [Voice] Phát hiện Bot đứng ngoài, đang kết nối vào Hub...")
             await hub_channel.connect(reconnect=True, timeout=20)
-            print("✅ [Voice] Đã kết nối lại!")
-        
+            print("✅ [Voice] Kết nối thành công!")
+            return # Thoát để chờ vòng lặp sau
+
         # TRƯỜNG HỢP 2: Bot ở một mình trong phòng JTC cũ (không phải Hub)
         elif len(vc.channel.members) == 1 and vc.channel.id != HUB_CHANNEL_ID:
             print("🔄 [Voice] Phòng vắng người, quay về Hub...")
             await vc.disconnect(force=True)
             await asyncio.sleep(2)
             await hub_channel.connect(reconnect=True)
-            
-        # TRƯỜNG HỢP 3: Bot kẹt ở Hub quá lâu (JTC không move đi)
+            return
+
+        # TRƯỜNG HỢP 3: Bot đang kẹt ở Hub (JTC không move đi)
         elif vc.channel.id == HUB_CHANNEL_ID:
-            # Nếu ở Hub quá 10 giây mà không bị move đi, thử reset kết nối
-            await asyncio.sleep(10)
+            # Kiểm tra xem có ai khác trong Hub không (thường là bot JTC hoặc người dùng)
+            # Nếu sau 5s vẫn ở Hub, ta tiến hành reset
+            await asyncio.sleep(5)
+            # Cần lấy lại vc sau khi sleep để check trạng thái mới nhất
             current_vc = discord.utils.get(bot.voice_clients, guild=hub_channel.guild)
             if current_vc and current_vc.channel.id == HUB_CHANNEL_ID:
-                print("⚠️ [Voice] Kẹt tại Hub, đang reset...")
+                print("⚠️ [Voice] Bot bị kẹt ở Hub, đang reset kết nối...")
                 await current_vc.disconnect(force=True)
                 await asyncio.sleep(2)
                 await hub_channel.connect(reconnect=True)
 
     except Exception as e:
-        print(f"❌ [Voice Error]: {e}")
-        # traceback.print_exc() # Mở dòng này nếu muốn xem chi tiết lỗi kỹ thuật
+        # Bỏ qua lỗi nếu bot đã vào được rồi (tránh spam log đỏ)
+        if "Already connected" in str(e):
+            pass
+        else:
+            print(f"❌ [Voice Error]: {e}")
 
 async def check_voice_status(bot, member, before, after):
-    """Hàm bổ trợ khi bot bị kick hoặc văng voice"""
+    """Hàm xử lý sự kiện khi bot bị kick hoặc văng voice"""
     if member.id == bot.user.id and after.channel is None:
-        print("⚠️ [Voice] Bot bị văng khỏi kênh. Vòng lặp sẽ tự động đưa bot trở lại sau tối đa 30s.")
-        # Không cần gọi thủ công nữa, hãy để loop 30s tự làm việc của nó cho ổn định
+        print("⚠️ [Voice] Bot vừa bị văng khỏi voice! Sẽ tự động kiểm tra lại...")
+        # Đợi một chút cho Discord ổn định trạng thái rồi mới gọi loop
+        await asyncio.sleep(5)
+        # Kiểm tra nếu loop chưa chạy thì mới gọi, hoặc để loop 30s tự lo
+        if not voice_keepalive_loop.is_running():
+            await voice_keepalive_loop(bot)
