@@ -2,7 +2,7 @@ import discord
 import asyncio
 from discord.ext import tasks
 
-HUB_CHANNEL_ID = 1490301863692865597 
+HUB_CHANNEL_ID = 1503354577804726472
 
 @tasks.loop(seconds=20) # Giảm xuống 20s cho nhạy
 async def voice_keepalive_loop(bot):
