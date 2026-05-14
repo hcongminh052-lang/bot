@@ -10,6 +10,7 @@ from discord.ext import commands
 from keep_alive import keep_alive
 from voice_task import voice_keepalive_loop, check_voice_status
 from feed_task import start_feed_task
+from react_handler import ReactHandler
 
 prefix = "!"
 intents = discord.Intents.all()
@@ -19,6 +20,9 @@ bot = commands.Bot(command_prefix=prefix,
                    case_insensitive=True,
                    intents=intents,
                    self_bot = True)
+
+handler = ReactHandler(None, "checkpoints_multi.json", "channels.txt")
+handler.bot = bot # Gán bot vào handler sau khi khởi tạo
 
 def listToString(s):
     str1 = ""
@@ -54,6 +58,10 @@ async def cmd(ctx):
 @bot.event
 async def on_ready():
     print(f'✅ Bot {bot.user} đã lên sóng!')
+    print(f'📊 Tiến độ React: {handler.current_total}/{handler.limit}')
+    
+    # Khởi chạy worker xử lý reaction (MỚI)
+    bot.loop.create_task(handler.reaction_worker())
     
     # Kiểm tra và chạy loop voice
     if not voice_keepalive_loop.is_running():
@@ -185,6 +193,67 @@ async def deletmessage(ctx, soluong):
         await ctx.send(f":wastebasket: Đã xoá {demtn} tin nhắn!")
     else:
         await ctx.send("Warning: Vượt quá giới hạn xoá tin nhắn")
+
+@bot.event
+async def on_message(message):
+    if not handler.auto_enabled or message.channel.id not in handler.target_channels:
+        await bot.process_commands(message)
+        return
+
+    async def wait_and_push(m):
+        await asyncio.sleep(random.uniform(10, 15))
+        try:
+            ref_msg = await m.channel.fetch_message(m.id)
+            if ref_msg.reactions: await handler.queue.put(ref_msg)
+        except: pass
+
+    bot.loop.create_task(wait_and_push(message))
+    await bot.process_commands(message)
+
+@bot.command(aliases=["clean"])
+async def follow_old(ctx):
+    try: await ctx.message.delete()
+    except: pass
+    if not handler.auto_enabled: return
+    
+    handler.is_cleaning = True
+    print("🧹 [HỆ THỐNG] ĐANG QUÉT...")
+    for cid in handler.target_channels:
+        channel = bot.get_channel(cid)
+        if not channel: continue
+        last_id = handler.checkpoints.get(str(cid), {}).get("last_id")
+        args = {"limit": 500}
+        if last_id: args["before"] = discord.Object(id=int(last_id))
+
+        async for msg in channel.history(**args):
+            if msg.reactions: await handler.queue.put(msg)
+            handler.checkpoints[str(cid)] = {"last_id": str(msg.id)}
+        handler.save_all_data()
+        print(f"✅ Xong kênh: {cid}")
+    handler.is_cleaning = False
+    print("🏁 HOÀN TẤT QUÉT.")
+
+@bot.command()
+async def total(ctx, num: int):
+    handler.limit, handler.current_total = num, 0
+    handler.save_all_data()
+    print(f"♻️ Hạn mức mới: {num}")
+
+@bot.command()
+async def reload(ctx):
+    handler.target_channels = handler.load_target_channels()
+    print(f"🔄 Đã cập nhật {len(handler.target_channels)} kênh.")
+
+@bot.command()
+async def start(ctx):
+    handler.auto_enabled = True
+    print("▶️ BẬT")
+
+@bot.command()
+async def stop(ctx):
+    handler.auto_enabled = False
+    handler.save_all_data()
+    print("⛔ DỪNG")
 
 @bot.command()
 async def allem(ctx):
