@@ -235,22 +235,38 @@ async def follow_old(ctx):
 
 @bot.command()
 async def total(ctx, num: int):
+    try:
+        await ctx.message.delete()
+    except:
+        pass
     handler.limit, handler.current_total = num, 0
     handler.save_all_data()
     print(f"♻️ Hạn mức mới: {num}")
 
 @bot.command()
 async def reload(ctx):
+    try:
+        await ctx.message.delete()
+    except:
+        pass
     handler.target_channels = handler.load_target_channels()
     print(f"🔄 Đã cập nhật {len(handler.target_channels)} kênh.")
 
 @bot.command()
 async def start(ctx):
+    try:
+        await ctx.message.delete()
+    except:
+        pass
     handler.auto_enabled = True
     print("▶️ BẬT")
 
 @bot.command()
 async def stop(ctx):
+    try:
+        await ctx.message.delete()
+    except:
+        pass
     handler.auto_enabled = False
     handler.save_all_data()
     print("⛔ DỪNG")
