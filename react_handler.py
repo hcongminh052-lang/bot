@@ -35,7 +35,7 @@ class ReactHandler:
                 with open(self.checkpoint_file, "r") as f:
                     return json.load(f)
             except: pass
-        return {"checkpoints": {}, "stats": {"current_total": 0, "limit": 50}}
+        return {"checkpoints": {}, "stats": {"current_total": 0, "limit": 10000}}
 
     def save_all_data(self):
         data = {
