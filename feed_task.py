@@ -11,8 +11,6 @@ async def auto_feed_loop(bot):
     channel = bot.get_channel(FEED_CHANNEL_ID)
     if channel:
         try:
-            # Lần chạy đầu tiên (index 0) sẽ gửi ngay
-            # Từ lần thứ 2 trở đi sẽ chờ thêm một khoảng ngẫu nhiên cho an toàn
             if auto_feed_loop.current_loop > 0:
                 extra_wait = random.randint(60, 300) # Chờ ngẫu nhiên 1-5 phút
                 print(f"--- Đang chờ {extra_wait}s trước khi farm đợt tiếp theo ---")
