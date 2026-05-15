@@ -4,7 +4,7 @@ from discord.ext import tasks
 
 HUB_CHANNEL_ID = 1490301863692865597
 
-@tasks.loop(seconds=20) # Giảm xuống 20s cho nhạy
+@tasks.loop(seconds=20)
 async def voice_keepalive_loop(bot):
     if not bot.is_ready():
         return
