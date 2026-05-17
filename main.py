@@ -10,6 +10,7 @@ from discord.ext import commands
 from keep_alive import keep_alive
 from voice_task import voice_keepalive_loop, check_voice_status
 from feed_task import start_feed_task
+from gacha_handler import GachaHandler
 
 prefix = "!"
 intents = discord.Intents.all()
@@ -19,6 +20,8 @@ bot = commands.Bot(command_prefix=prefix,
                    case_insensitive=True,
                    intents=intents,
                    self_bot = True)
+
+gacha_manager = GachaHandler(bot)
 
 def listToString(s):
     str1 = ""
@@ -60,6 +63,10 @@ async def on_ready():
         voice_keepalive_loop.start(bot) # Truyền bot vào đây
         
     start_feed_task(bot)
+  
+    # KÍCH HOẠT TỰ ĐỘNG ROLL FREE 24H TỪ FILE RIÊNG
+    gacha_manager.start_loop()
+    print("🎰 [HỆ THỐNG] Vòng lặp Tự động Roll Free đã được kích hoạt ngầm.")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
