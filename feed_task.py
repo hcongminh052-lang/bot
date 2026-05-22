@@ -6,7 +6,7 @@ from datetime import datetime
 
 FEED_CHANNEL_ID = 1214564167520886804 
 
-@tasks.loop(hours=8)
+@tasks.loop(hours=2)
 async def auto_feed_loop(bot):
     channel = bot.get_channel(FEED_CHANNEL_ID)
     if channel:
