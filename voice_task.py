@@ -5,7 +5,7 @@ from discord.ext import tasks
 # ID Kênh Voice bạn muốn bot vào treo cố định
 HUB_CHANNEL_ID = 1490301863692865597
 
-@tasks.loop(seconds=30)  # Tăng lên 30 giây để an toàn, tránh spam API của Discord
+@tasks.loop(seconds=30)  # Giãn cách 30 giây để an toàn cho API
 async def voice_keepalive_loop(bot):
     if not bot.is_ready():
         return
@@ -15,36 +15,32 @@ async def voice_keepalive_loop(bot):
         print(f"❌ [Voice] Không tìm thấy kênh thoại với ID {HUB_CHANNEL_ID}")
         return
 
-    # Lấy trạng thái kết nối Voice hiện tại của bot trong Server đó
+    # Lấy trạng thái kết nối Voice hiện tại của bot trong Server
     vc = discord.utils.get(bot.voice_clients, guild=hub_channel.guild)
 
     try:
-        # TRƯỜNG HỢP 1: Bot chưa vào Voice hoặc bị mất kết nối (Văng phòng)
+        # TRƯỜNG HỢP 1: Bot chưa vào Voice hoặc bị văng phòng
         if vc is None or not vc.is_connected():
             print("📡 [Voice] Đang tiến hành kết nối vào kênh chỉ định...", flush=True)
             
-            # Kết nối vào phòng và ép buộc tắt Mic (self_mute), tắt Tai nghe (self_deafen)
-            await hub_channel.connect(
-                reconnect=True, 
-                timeout=20, 
-                self_mute=True, 
-                self_deafen=True
-            )
+            # 1. Kết nối vào phòng bằng lệnh cơ bản để tránh lỗi biến argument
+            vc = await hub_channel.connect(reconnect=True, timeout=20)
+            await asyncio.sleep(1.5) # Chờ 1.5 giây cho luồng kết nối thiết lập xong ổn định
+            
+            # 2. Ép tài khoản tự động Tắt mic (self_mute) và Tắt tai nghe (self_deafen) từ phía Client
+            await hub_channel.guild.change_voice_state(channel=hub_channel, self_mute=True, self_deafen=True)
             print("🔒 [Voice] Đã treo máy ổn định + Khóa Mic & Tai nghe thành công!", flush=True)
             return
 
-        # TRƯỜNG HỢP 2: Bot đang ở sai phòng (Do bị ai đó dùng quyền Admin kéo đi phòng khác)
+        # TRƯỜNG HỢP 2: Bot đang ở sai phòng (Do bị Admin khác kéo đi)
         if vc.channel.id != HUB_CHANNEL_ID:
             print(f"⚠️ [Voice] Phát hiện bot bị kéo sang phòng khác ({vc.channel.name}). Đang quay về phòng cũ...", flush=True)
             await vc.disconnect(force=True)
-            await asyncio.sleep(2)  # Đợi 2 giây cho việc ngắt kết nối hoàn tất sạch sẽ
+            await asyncio.sleep(2) 
             
-            await hub_channel.connect(
-                reconnect=True, 
-                timeout=20, 
-                self_mute=True, 
-                self_deafen=True
-            )
+            vc = await hub_channel.connect(reconnect=True, timeout=20)
+            await asyncio.sleep(1.5)
+            await hub_channel.guild.change_voice_state(channel=hub_channel, self_mute=True, self_deafen=True)
             print("🔒 [Voice] Đã quay về phòng chỉ định + Khóa Mic!", flush=True)
 
     except discord.errors.HTTPException as e:
@@ -62,21 +58,21 @@ async def voice_keepalive_loop(bot):
 
 async def check_voice_status(bot, member, before, after):
     """Xử lý sự kiện thời gian thực khi có tác động đến Voice của bot"""
-    # Nếu sự kiện xảy ra tác động trực tiếp lên chính con Bot
     if member.id == bot.user.id:
-        # Tình huống A: Bot bị Kick hẳn ra khỏi phòng Voice (Văng về trạng thái không ở phòng nào)
+        hub_channel = bot.get_channel(HUB_CHANNEL_ID)
+        if not hub_channel: return
+
+        # Tình huống A: Bot bị Kick hẳn ra khỏi phòng Voice
         if after.channel is None:
-            print("⚠️ [Voice] Bot bị kick ra khỏi phòng! Đang kích hoạt kết nối lại lập tức...", flush=True)
+            print("⚠️ [Voice] Bot bị kick ra khỏi phòng! Đang kích hoạt kết nối lại...", flush=True)
             if voice_keepalive_loop.is_running():
                 voice_keepalive_loop.restart(bot)
         
-        # Tình huống B: Bot bị Admin Server tắt Mute hoặc tắt Deafen thủ công bằng quyền của Server
+        # Tình huống B: Bot bị mở Mic hoặc mở Tai nghe ra thủ công
         elif after.channel.id == HUB_CHANNEL_ID:
             if not after.self_mute or not after.self_deafen:
-                # Nếu phát hiện Mic hoặc Tai nghe bị mở ra, tiến hành kết nối đè để ép khóa lại
-                vc = discord.utils.get(bot.voice_clients, guild=hub_channel.guild)
-                if vc and vc.is_connected():
-                    try:
-                        await hub_channel.connect(reconnect=True, timeout=10, self_mute=True, self_deafen=True)
-                    except:
-                        pass
+                print("🔒 [Voice Check] Phát hiện trạng thái Mic bị thay đổi, tiến hành khóa lại...", flush=True)
+                try:
+                    await hub_channel.guild.change_voice_state(channel=hub_channel, self_mute=True, self_deafen=True)
+                except:
+                    pass
