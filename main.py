@@ -21,8 +21,7 @@ bot = commands.Bot(command_prefix=prefix,
                    intents=intents,
                    self_bot = True)
 
-farm_exp = False
-TARGET_CHANNEL_ID = 1381302690335952988
+CHANNEL_ID = 1281163648672337951
 
 gacha_manager = GachaHandler(bot)
 
@@ -204,61 +203,66 @@ async def allem(ctx):
     for em in ctx.guild.emojis:
         print(em.name, em.id)
 
-@bot.command(aliases=["se"])
-async def startexp(ctx):
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-        
-    global farm_exp
-    if farm_exp:
-        print("⚠️ Luồng farm EXP hiện tại vốn đã đang chạy rồi!")
-        return
+is_farming = False
 
-    farm_exp = True
-    channel = bot.get_channel(TARGET_CHANNEL_ID)
-    
-    if not channel:
-        print(f"❌ Không tìm thấy kênh với ID {TARGET_CHANNEL_ID}. Vui lòng kiểm tra lại ID hoặc quyền hạn của tài khoản!")
-        farm_exp = False
-        return
-
-    emoji_list = [em for em in ctx.guild.emojis if not em.animated]
-
-    print("===== 🔥 BẮT ĐẦU LUỒNG CÀY EXP =====")
-    print(f"📦 Đã nạp thành công {len(emoji_list)} emoji tĩnh từ máy chủ.")
-
-    if not emoji_list:
-        print("⚠️ Máy chủ này không có emoji tĩnh nào. Luồng tự động chuyển sang gửi chữ mặc định để tránh lỗi.")
-
-    while farm_exp:
+async def farm_loop():
+    while is_farming:
         try:
-            if emoji_list:
-                so_luong = random.randint(1, 1)
-                chosen = random.sample(emoji_list, so_luong)
-                text = "".join(str(em) for em in chosen)
-            else:
-                text = f"farm exp {random.randint(100, 999)}"
-
-            await channel.send(text)
-            print(f"✨ [FARM EXP] Đã gửi: {text}", flush=True)
+            channel = bot.get_channel(CHANNEL_ID)
+            if not channel:
+                print("⚠️ Không tìm thấy kênh, kiểm tra lại ID kênh!", flush=True)
+                await asyncio.sleep(10)
+                continue
             
-        except Exception as e:
-            print(f"❌ [FARM EXP] Gặp lỗi khi gửi tin nhắn: {e}", flush=True)
-          
-        await asyncio.sleep(random.randint(60, 90))
+            # 🔥 LẤY TẤT CẢ EMOJI TĨNH TRONG SERVER CỦA KÊNH ĐÓ
+            server_emojis = [e for e in channel.guild.emojis if not e.animated]
+            
+            if not server_emojis:
+                print("⚠️ Server này không có emoji tĩnh custom nào! Dùng tạm emoji gốc.", flush=True)
+                pool_emojis = ["👍", "🔥", "❤️", "✅", "🌟"]
+            else:
+                pool_emojis = server_emojis
 
-@bot.command(aliases=["xe"])
-async def stopexp(ctx):
-    try:
-        await ctx.message.delete()
-    except:
-        pass
-        
-    global farm_exp
-    farm_exp = False
-    print("===== 🛑 ĐÃ DỪNG LUỒNG CÀY EXP =====", flush=True)
+            # 1. Gửi tin nhắn mồi để lấy EXP chat
+            msg_content = f"Chu kỳ farm tự động #{random.randint(1000, 9999)}"
+            msg = await channel.send(msg_content)
+            print(f"📝 [FARM] Đã gửi tin nhắn mồi: {msg_content}", flush=True)
+            
+            # 2. Lấy ngẫu nhiên 2-3 emoji tĩnh của server để thả vào bài
+            num_reacts = min(len(pool_emojis), random.randint(2, 3))
+            chosen_emojis = random.sample(pool_emojis, num_reacts)
+            
+            for emoji in chosen_emojis:
+                await msg.add_reaction(emoji)
+                await asyncio.sleep(random.uniform(0.5, 1.0)) # Giãn cách nhẹ giữa các lần thả
+            print(f"✨ [FARM] Đã tự động thả {num_reacts} emoji tĩnh của server.", flush=True)
+                
+        except discord.errors.HTTPException as e:
+            print(f"🚫 Lỗi Discord (Có thể bị giới hạn nhanh): {e}", flush=True)
+        except Exception as e:
+            print(f"⚠️ [CẢNH BÁO] Lỗi luồng ngầm: {e}. Đang bỏ qua...", flush=True)
+            
+        # 3. Giãn cách chuẩn từ 60 giây đến 90 giây
+        sleep_time = random.randint(60, 90)
+        print(f"💤 [NGỦ] Nghỉ ngơi {sleep_time} giây trước lượt tiếp theo...\n", flush=True)
+        await asyncio.sleep(sleep_time)
+
+# ==================== LỆNH ĐIỀU KHIỂN ====================
+@bot.command()
+async def start(ctx):
+    global is_farming
+    if is_farming: 
+        print("⚠️ Tool đang chạy rồi!", flush=True)
+        return
+    is_farming = True
+    bot.loop.create_task(farm_loop())
+    print("▶️ [KÍCH HOẠT] Đã bật luồng Farm EXP tự động bằng Emoji tĩnh của Server (60s-90s)!", flush=True)
+
+@bot.command()
+async def stop(ctx):
+    global is_farming
+    is_farming = False
+    print("⛔ [DỪNG] Đã tắt luồng Farm EXP.", flush=True)
       
 keep_alive()
 bot.run(TOKEN, bot = False)
