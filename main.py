@@ -21,7 +21,7 @@ bot = commands.Bot(command_prefix=prefix,
                    intents=intents,
                    self_bot = True)
 
-CHANNEL_ID = 1281163648672337951
+CHANNEL_ID = 1381302690335952988
 
 gacha_manager = GachaHandler(bot)
 
@@ -248,7 +248,7 @@ async def farm_loop():
         await asyncio.sleep(sleep_time)
 
 # ==================== LỆNH ĐIỀU KHIỂN ====================
-@bot.command()
+@bot.command(aliases = ["se"])
 async def start(ctx):
     global is_farming
     if is_farming: 
@@ -258,7 +258,7 @@ async def start(ctx):
     bot.loop.create_task(farm_loop())
     print("▶️ [KÍCH HOẠT] Đã bật luồng Farm EXP tự động bằng Emoji tĩnh của Server (60s-90s)!", flush=True)
 
-@bot.command()
+@bot.command(aliases = ["xe"])
 async def stop(ctx):
     global is_farming
     is_farming = False
