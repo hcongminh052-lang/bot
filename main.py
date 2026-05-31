@@ -21,6 +21,9 @@ bot = commands.Bot(command_prefix=prefix,
                    intents=intents,
                    self_bot = True)
 
+farm_exp = False
+TARGET_CHANNEL_ID = 1381302690335952988
+
 gacha_manager = GachaHandler(bot)
 
 def listToString(s):
@@ -201,36 +204,61 @@ async def allem(ctx):
     for em in ctx.guild.emojis:
         print(em.name, em.id)
 
-farm_exp = False
 @bot.command(aliases=["se"])
 async def startexp(ctx):
-    await ctx.message.delete()
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+        
     global farm_exp
+    if farm_exp:
+        print("⚠️ Luồng farm EXP hiện tại vốn đã đang chạy rồi!")
+        return
+
     farm_exp = True
-    channel = bot.get_channel(1381302690335952988)
+    channel = bot.get_channel(TARGET_CHANNEL_ID)
+    
+    if not channel:
+        print(f"❌ Không tìm thấy kênh với ID {TARGET_CHANNEL_ID}. Vui lòng kiểm tra lại ID hoặc quyền hạn của tài khoản!")
+        farm_exp = False
+        return
 
     emoji_list = [em for em in ctx.guild.emojis if not em.animated]
 
-    print("===== BAT DAU CAY EXP =====")
-    print("Emoji thuong load duoc:", len(emoji_list))
+    print("===== 🔥 BẮT ĐẦU LUỒNG CÀY EXP =====")
+    print(f"📦 Đã nạp thành công {len(emoji_list)} emoji tĩnh từ máy chủ.")
+
+    if not emoji_list:
+        print("⚠️ Máy chủ này không có emoji tĩnh nào. Luồng tự động chuyển sang gửi chữ mặc định để tránh lỗi.")
 
     while farm_exp:
         try:
-            so_luong = random.randint(1, 1)
-            chosen = random.sample(emoji_list, so_luong)
-            text = "".join(str(em) for em in chosen)
+            if emoji_list:
+                so_luong = random.randint(1, 1)
+                chosen = random.sample(emoji_list, so_luong)
+                text = "".join(str(em) for em in chosen)
+            else:
+                text = f"farm exp {random.randint(100, 999)}"
+
             await channel.send(text)
-            print("Da gui:", text)
+            print(f"✨ [FARM EXP] Đã gửi: {text}", flush=True)
+            
         except Exception as e:
-            print("Loi gui:", e)
+            print(f"❌ [FARM EXP] Gặp lỗi khi gửi tin nhắn: {e}", flush=True)
+          
         await asyncio.sleep(random.randint(60, 90))
 
 @bot.command(aliases=["xe"])
 async def stopexp(ctx):
-    await ctx.message.delete()
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+        
     global farm_exp
     farm_exp = False
-    print("===== DA DUNG CAY EXP =====")
+    print("===== 🛑 ĐÃ DỪNG LUỒNG CÀY EXP =====", flush=True)
       
 keep_alive()
 bot.run(TOKEN, bot = False)
