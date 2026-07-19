@@ -31,13 +31,16 @@ def clean_final_answer(text):
     return text.strip()
 
 def google_search_answer(question_text):
-    clean_question = re.sub(r'hay reply trực tiếp.*', '', question_text, flags=re.IGNORECASE)
-    clean_question = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\?]', '', clean_question)
-    clean_question = clean_question.strip()
-    
-    print(f"🔍 [GOOGLE] Đang tìm kiếm từ in đậm cho câu hỏi: {clean_question}", flush=True)
-
     try:
+        lines = [line.strip() for line in question_text.split('\n') if line.strip()]
+        if not lines:
+            return None
+            
+        clean_question = lines[0]
+        clean_question = re.sub(r'\*\*|__', '', clean_question)
+        
+        print(f"🔍 [GOOGLE] Đang tìm kiếm từ in đậm cho câu hỏi: {clean_question}", flush=True)
+
         query = urllib.parse.quote_plus(clean_question)
         url = f"https://www.google.com/search?q={query}&hl=vi"
         
