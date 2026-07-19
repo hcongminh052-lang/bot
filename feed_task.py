@@ -33,6 +33,7 @@ def google_search_answer(question_text):
     for kw in keywords:
         if kw.lower() in clean_question.lower():
             return kw
+            
     try:
         search_query = f"{clean_question} Genshin Impact wiki"
         urls = list(search(search_query, num_results=3, lang="vi"))
