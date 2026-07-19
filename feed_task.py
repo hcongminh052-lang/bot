@@ -9,9 +9,8 @@ import pytz
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime
-from googlesearch import search
-from bs4 import BeautifulSoup
 import io
+from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1381506157591527464
 
@@ -36,37 +35,31 @@ def google_search_answer(question_text):
     clean_question = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\?]', '', clean_question)
     clean_question = clean_question.strip()
     
-    print(f"🔍 [GOOGLE] Đang tra cứu cụm từ: {clean_question}", flush=True)
+    print(f"🔍 [GOOGLE] Đang tìm kiếm từ in đậm cho câu hỏi: {clean_question}", flush=True)
 
     try:
-        urls = list(search(clean_question, num_results=3, lang="vi"))
+        query = urllib.parse.quote_plus(clean_question)
+        url = f"https://www.google.com/search?q={query}&hl=vi"
         
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        for url in urls:
-            try:
-                res = requests.get(url, headers=headers, timeout=4)
-                if res.status == 200:
-                    soup = BeautifulSoup(res.text, 'html.parser')
-                    
-                    for item in soup.find_all(['p', 'span', 'strong', 'h1', 'h2']):
-                        text_content = item.get_text().strip()
-                        
-                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', text_content)
-                        if match:
-                            raw_ans = match.group(1).strip()
-                            final_ans = clean_final_answer(raw_ans)
-                            
-                            words = final_ans.split()
-                            if 1 <= len(words) <= 4:
-                                return final_ans
-            except Exception:
-                continue
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            
+            for bold_tag in soup.find_all(['em', 'strong', 'b']):
+                bold_text = bold_tag.get_text().strip()
+                cleaned = clean_final_answer(bold_text)
                 
+                if cleaned and cleaned.lower() not in clean_question.lower():
+                    words = cleaned.split()
+                    if 1 <= len(words) <= 4:
+                        return cleaned
+                        
     except Exception as e:
-        print(f"❌ [GOOGLE] Lỗi trong quá trình tìm kiếm dữ liệu: {e}", flush=True)
+        print(f"❌ [GOOGLE] Lỗi trích xuất từ in đậm: {e}", flush=True)
         
     return None
 
