@@ -55,12 +55,21 @@ def google_search_answer(question_text):
             for bold_tag in soup.find_all(['em', 'strong', 'b']):
                 bold_text = bold_tag.get_text().strip()
                 cleaned = clean_final_answer(bold_text)
-                
                 if cleaned and cleaned.lower() not in clean_question.lower():
                     words = cleaned.split()
                     if 1 <= len(words) <= 4:
                         return cleaned
-                        
+
+            for g_item in soup.find_all('div', class_='VwiC3b'):
+                snippet_text = g_item.get_text().strip()
+                match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', snippet_text)
+                if match:
+                    raw_ans = match.group(1).strip()
+                    final_ans = clean_final_answer(raw_ans)
+                    words = final_ans.split()
+                    if 1 <= len(words) <= 4:
+                        return final_ans
+
     except Exception as e:
         print(f"❌ [GOOGLE] Lỗi trích xuất từ in đậm: {e}", flush=True)
         
