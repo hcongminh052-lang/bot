@@ -4,12 +4,12 @@ import asyncio
 import random
 import re
 import urllib.parse
-import requests
 import pytz
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime
 import io
+import aiohttp
 from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1381506157591527464
@@ -28,19 +28,30 @@ def is_valid_time():
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'\[[^\]]*\]', '', text)
-    text = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_]', '', text)
+    text = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
+def extract_real_question(text):
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    for line in lines:
+        if '?' in line and not line.startswith('💬') and not line.startswith('↩️'):
+            clean_line = re.sub(r'\*\*|__|[*_`]', '', line)
+            return clean_line.strip()
+            
+    for line in lines:
+        if not line.startswith('💬') and not line.startswith('↩️') and "Reply" not in line:
+            clean_line = re.sub(r'\*\*|__|[*_`]', '', line)
+            return clean_line.strip()
+            
+    return None
+
 async def google_search_answer(question_text):
     try:
-        lines = [line.strip() for line in question_text.split('\n') if line.strip()]
-        if not lines:
+        clean_question = extract_real_question(question_text)
+        if not clean_question:
             return None
             
-        clean_question = lines[0]
-        clean_question = re.sub(r'\*\*|__', '', clean_question)
-        
         print(f"🔍 [GOOGLE] Đang tìm kiếm từ in đậm cho câu hỏi: {clean_question}", flush=True)
 
         query = urllib.parse.quote_plus(clean_question)
@@ -61,17 +72,17 @@ async def google_search_answer(question_text):
                         cleaned = clean_final_answer(bold_text)
                         if cleaned and cleaned.lower() not in clean_question.lower():
                             words = cleaned.split()
-                            if 1 <= len(words) <= 4:
+                            if 1 <= len(words) <= 5:
                                 return cleaned
 
                     for g_item in soup.find_all('div', class_='VwiC3b'):
                         snippet_text = g_item.get_text().strip()
-                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', snippet_text)
+                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\],]+)', snippet_text)
                         if match:
                             raw_ans = match.group(1).strip()
                             final_ans = clean_final_answer(raw_ans)
                             words = final_ans.split()
-                            if 1 <= len(words) <= 4:
+                            if 1 <= len(words) <= 5:
                                 return final_ans
 
     except Exception as e:
