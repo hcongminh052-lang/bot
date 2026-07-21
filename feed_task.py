@@ -18,6 +18,8 @@ FEED_CHANNEL_IDS = [
     1214564167520886804
 ]
 
+IS_FEED_ENABLED = True
+
 def is_valid_time():
     tz = pytz.timezone('Asia/Ho_Chi_Minh')
     now = datetime.now(tz)
@@ -30,7 +32,7 @@ def clean_final_answer(text):
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
-def google_search_answer(question_text):
+async def google_search_answer(question_text):
     try:
         lines = [line.strip() for line in question_text.split('\n') if line.strip()]
         if not lines:
@@ -48,27 +50,29 @@ def google_search_answer(question_text):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code == 200:
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            for bold_tag in soup.find_all(['em', 'strong', 'b']):
-                bold_text = bold_tag.get_text().strip()
-                cleaned = clean_final_answer(bold_text)
-                if cleaned and cleaned.lower() not in clean_question.lower():
-                    words = cleaned.split()
-                    if 1 <= len(words) <= 4:
-                        return cleaned
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=5) as res:
+                if res.status == 200:
+                    html_text = await res.text()
+                    soup = BeautifulSoup(html_text, 'html.parser')
+                    
+                    for bold_tag in soup.find_all(['em', 'strong', 'b']):
+                        bold_text = bold_tag.get_text().strip()
+                        cleaned = clean_final_answer(bold_text)
+                        if cleaned and cleaned.lower() not in clean_question.lower():
+                            words = cleaned.split()
+                            if 1 <= len(words) <= 4:
+                                return cleaned
 
-            for g_item in soup.find_all('div', class_='VwiC3b'):
-                snippet_text = g_item.get_text().strip()
-                match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', snippet_text)
-                if match:
-                    raw_ans = match.group(1).strip()
-                    final_ans = clean_final_answer(raw_ans)
-                    words = final_ans.split()
-                    if 1 <= len(words) <= 4:
-                        return final_ans
+                    for g_item in soup.find_all('div', class_='VwiC3b'):
+                        snippet_text = g_item.get_text().strip()
+                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', snippet_text)
+                        if match:
+                            raw_ans = match.group(1).strip()
+                            final_ans = clean_final_answer(raw_ans)
+                            words = final_ans.split()
+                            if 1 <= len(words) <= 4:
+                                return final_ans
 
     except Exception as e:
         print(f"❌ [GOOGLE] Lỗi trích xuất từ in đậm: {e}", flush=True)
@@ -77,6 +81,10 @@ def google_search_answer(question_text):
 
 @tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
+    if not IS_FEED_ENABLED:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 Vòng lặp .feed đang tạm dừng.", flush=True)
+        return
+
     if not is_valid_time():
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ⏳ Ngoài khung giờ hoạt động (8h-22h). Bỏ qua lượt này.", flush=True)
         return
@@ -91,6 +99,9 @@ async def auto_feed_loop(bot_instance):
                 print(f"--- Đang chờ {extra_wait}s trước khi farm đợt tiếp theo ---", flush=True)
                 await asyncio.sleep(extra_wait)
             
+            if not IS_FEED_ENABLED:
+                return
+
             await channel.send(".feed")
             print(f"[{datetime.now().strftime('%H:%M:%S')}] 🌾 Đã gửi .feed vào kênh ngẫu nhiên: {chosen_channel_id}", flush=True)
             
@@ -104,6 +115,20 @@ async def auto_feed_loop(bot_instance):
 async def setup_message_listener(bot_instance):
     @bot_instance.event
     async def on_message(message):
+        global IS_FEED_ENABLED
+
+        if message.content == "!feed off":
+            IS_FEED_ENABLED = False
+            await message.reply("🛑 Đã tạm dừng vòng lặp tự động gửi `.feed`.")
+            print("⚙️ [HỆ THỐNG] Vòng lặp .feed đã chuyển sang: TẠM DỪNG.", flush=True)
+            return
+
+        if message.content == "!feed on":
+            IS_FEED_ENABLED = True
+            await message.reply("🌾 Đã bắt đầu lại vòng lặp tự động gửi `.feed`.")
+            print("⚙️ [HỆ THỐNG] Vòng lặp .feed đã chuyển sang: HOẠT ĐỘNG.", flush=True)
+            return
+
         if message.channel.id not in FEED_CHANNEL_IDS:
             return
 
@@ -115,8 +140,7 @@ async def setup_message_listener(bot_instance):
             if "CÂU HỎI FEED" in title or "Reply trực tiếp" in description:
                 print(f"🎯 [BOT GAME] Phát hiện câu hỏi tại kênh {message.channel.id}: {description}", flush=True)
                 
-                loop = asyncio.get_event_loop()
-                answer = await loop.run_in_executor(None, google_search_answer, description)
+                answer = await google_search_answer(description)
                 
                 if answer:
                     await asyncio.sleep(random.uniform(3.0, 5.0))
