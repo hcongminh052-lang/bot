@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
-from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1381506157591527464
 
@@ -46,49 +45,48 @@ def extract_real_question(text):
             
     return None
 
-async def google_search_answer(question_text):
+async def query_duckduckgo_ai(clean_question):
+    url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(clean_question)}&format=json&kl=wt-wt"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+    
     try:
-        clean_question = extract_real_question(question_text)
-        if not clean_question:
-            return None
-            
-        print(f"🔍 [GOOGLE] Đang tìm kiếm từ in đậm cho câu hỏi: {clean_question}", flush=True)
-
-        query = urllib.parse.quote_plus(clean_question)
-        url = f"https://www.google.com/search?q={query}&hl=vi"
-        
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=5) as res:
                 if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
+                    data = await res.json()
                     
-                    for bold_tag in soup.find_all(['em', 'strong', 'b']):
-                        bold_text = bold_tag.get_text().strip()
-                        cleaned = clean_final_answer(bold_text)
-                        if cleaned and cleaned.lower() not in clean_question.lower():
-                            words = cleaned.split()
-                            if 1 <= len(words) <= 5:
-                                return cleaned
-
-                    for g_item in soup.find_all('div', class_='VwiC3b'):
-                        snippet_text = g_item.get_text().strip()
-                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\],]+)', snippet_text)
+                    answer_text = data.get("AbstractText") or data.get("Answer")
+                    
+                    if not answer_text and data.get("RelatedTopics"):
+                        for topic in data["RelatedTopics"]:
+                            if "Text" in topic:
+                                answer_text = topic["Text"]
+                                break
+                                
+                    if answer_text:
+                        match = re.search(r'(?:is the| là| có tên| tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s]+)', answer_text)
                         if match:
-                            raw_ans = match.group(1).strip()
-                            final_ans = clean_final_answer(raw_ans)
-                            words = final_ans.split()
-                            if 1 <= len(words) <= 5:
-                                return final_ans
-
+                            return clean_final_answer(match.group(1))
+                            
+                        cleaned = clean_final_answer(answer_text)
+                        words = cleaned.split()
+                        if 1 <= len(words) <= 4:
+                            return cleaned
     except Exception as e:
-        print(f"❌ [GOOGLE] Lỗi trích xuất từ in đậm: {e}", flush=True)
+        print(f"❌ [AI QUERY] Lỗi truy vấn API: {e}", flush=True)
         
     return None
+
+async def solve_question(question_text):
+    clean_question = extract_real_question(question_text)
+    if not clean_question:
+        return None
+        
+    print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
+    return await query_duckduckgo_ai(clean_question)
 
 @tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
@@ -151,14 +149,14 @@ async def setup_message_listener(bot_instance):
             if "CÂU HỎI FEED" in title or "Reply trực tiếp" in description:
                 print(f"🎯 [BOT GAME] Phát hiện câu hỏi tại kênh {message.channel.id}: {description}", flush=True)
                 
-                answer = await google_search_answer(description)
+                answer = await solve_question(description)
                 
                 if answer:
                     await asyncio.sleep(random.uniform(3.0, 5.0))
                     await message.reply(answer)
                     print(f"✅ [FEED] Đã tự động phản hồi đáp án tìm thấy: {answer}", flush=True)
                 else:
-                    print("⚠️ [FEED] Không thể trích xuất được đáp án chính xác từ Google.", flush=True)
+                    print("⚠️ [FEED] Không thể trích xuất được đáp án chính xác.", flush=True)
 
 def start_feed_task(bot):
     asyncio.create_task(setup_message_listener(bot))
