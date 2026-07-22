@@ -67,18 +67,22 @@ def parse_best_answer(raw_text):
 
 async def fetch_free_openrouter_models(session):
     url = "https://openrouter.ai/api/v1/models"
+    ignored_keywords = ["safety", "guard", "moderation", "embed"]
     try:
         async with session.get(url, timeout=5) as res:
             if res.status == 200:
                 data = await res.json()
                 models_data = data.get("data", [])
-                free_models = [
-                    m["id"] for m in models_data 
-                    if m.get("id", "").endswith(":free") or 
-                       (m.get("pricing", {}).get("prompt") == "0" and m.get("pricing", {}).get("completion") == "0")
-                ]
-                if free_models:
-                    return free_models[:5]
+                
+                valid_models = []
+                for m in models_data:
+                    m_id = m.get("id", "").lower()
+                    is_free = m_id.endswith(":free") or (m.get("pricing", {}).get("prompt") == "0" and m.get("pricing", {}).get("completion") == "0")
+                    if is_free and not any(k in m_id for k in ignored_keywords):
+                        valid_models.append(m["id"])
+                
+                if valid_models:
+                    return valid_models[:5]
     except Exception:
         pass
     return ["openrouter/auto"]
@@ -111,7 +115,7 @@ async def ask_openrouter_api(clean_question):
             }
             try:
                 print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
-                async with session.post(url, headers=headers, json=payload, timeout=10) as res:
+                async with session.post(url, headers=headers, json=payload, timeout=18) as res:
                     print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         data = await res.json()
