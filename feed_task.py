@@ -75,10 +75,10 @@ async def ask_openrouter_api(clean_question):
     }
     
     models = [
-        "google/gemma-2-9b-it:free",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "mistralai/mistral-7b-instruct:free",
-        "openchat/openchat-7b:free"
+        "google/gemini-2.0-flash-lite-preview-02-05:free",
+        "google/gemini-2.0-pro-exp-02-05:free",
+        "qwen/qwen-2.5-coder-32b-instruct:free",
+        "deepseek/deepseek-r1:free"
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -118,24 +118,6 @@ async def ask_openrouter_api(clean_question):
 
     return None
 
-async def ask_pollinations_fallback(clean_question):
-    prompt = f"Question: {clean_question}\nAnswer ONLY the exact short name (1-3 words):"
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = f"https://text.pollinations.ai/{encoded_prompt}"
-    
-    try:
-        print(f"🌐 [POLLINATIONS] Gửi request fallback...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as res:
-                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
-                if res.status == 200:
-                    raw_text = await res.text()
-                    return parse_best_answer(raw_text)
-    except Exception as e:
-        print(f"  └─ ❌ [POLLINATIONS EXCEPTION]: {e}", flush=True)
-                
-    return None
-
 async def solve_question(question_text):
     clean_question = extract_real_question(question_text)
     if not clean_question:
@@ -148,11 +130,6 @@ async def solve_question(question_text):
     if ans_openrouter:
         print(f"✅ [KẾT QUẢ OPENROUTER]: {ans_openrouter}\n============================================================\n", flush=True)
         return ans_openrouter
-
-    ans_fallback = await ask_pollinations_fallback(clean_question)
-    if ans_fallback:
-        print(f"✅ [KẾT QUẢ POLLINATIONS]: {ans_fallback}\n============================================================\n", flush=True)
-        return ans_fallback
 
     print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
     return None
