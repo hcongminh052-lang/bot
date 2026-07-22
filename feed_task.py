@@ -49,10 +49,26 @@ def parse_best_answer(raw_text):
     print(f"  ├─ 📄 [AI RAW RESPONSE]: {repr(raw_text)}", flush=True)
     
     text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+    
+    quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', text)
+    for match in quoted_matches:
+        cleaned_quote = clean_final_answer(match)
+        if 1 <= len(cleaned_quote.split()) <= 6:
+            return cleaned_quote
+
     text = re.sub(r'\*\*|__|\*|_|`', '', text).strip()
     lines = [l.strip() for l in text.split('\n') if l.strip()]
-    target_text = lines[0] if lines else text
     
+    filtered_lines = []
+    for line in lines:
+        lower_line = line.lower()
+        if any(lower_line.startswith(prefix) for prefix in [
+            "the user", "here is", "based on", "the answer", "câu trả lời", "đáp án", "theo tôi"
+        ]):
+            continue
+        filtered_lines.append(line)
+        
+    target_text = filtered_lines[0] if filtered_lines else (lines[0] if lines else text)
     target_text = re.sub(r'^(?:đáp án|câu trả lời|kết quả|tên món ăn)(?: là)?:\s*', '', target_text, flags=re.IGNORECASE)
     
     cleaned = clean_final_answer(target_text)
@@ -106,12 +122,16 @@ async def ask_openrouter_api(clean_question):
                 "model": model,
                 "messages": [
                     {
+                        "role": "system",
+                        "content": "Bạn là hệ thống trả lời câu hỏi trắc nghiệm/đố vui. Nhiệm vụ duy nhất: Trả lời NGẮN GỌN BẰNG TIẾNG VIỆT chính xác tên entity/đáp án (từ 1 đến 4 từ). KHÔNG giải thích, KHÔNG viết tiếng Anh, KHÔNG chào hỏi, KHÔNG lặp lại câu hỏi."
+                    },
+                    {
                         "role": "user",
-                        "content": f"Trả lời duy nhất tên/đáp án của câu hỏi sau (tối đa 1-4 từ), không viết câu hoàn chỉnh, không giải thích:\n\n{clean_question}"
+                        "content": f"Câu hỏi: {clean_question}\nĐáp án chính xác:"
                     }
                 ],
                 "temperature": 0.1,
-                "max_tokens": 60
+                "max_tokens": 40
             }
             try:
                 print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
