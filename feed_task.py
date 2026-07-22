@@ -75,10 +75,10 @@ async def ask_openrouter_api(clean_question):
     }
     
     models = [
-        "google/gemini-2.0-flash-lite-preview-02-05:free",
-        "google/gemini-2.0-pro-exp-02-05:free",
-        "qwen/qwen-2.5-coder-32b-instruct:free",
-        "deepseek/deepseek-r1:free"
+        "openrouter/auto",
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "mistralai/mistral-small-24b-instruct-2501:free",
+        "qwen/qwen-2.5-7b-instruct:free"
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -100,7 +100,7 @@ async def ask_openrouter_api(clean_question):
             }
             try:
                 print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
-                async with session.post(url, headers=headers, json=payload, timeout=6) as res:
+                async with session.post(url, headers=headers, json=payload, timeout=8) as res:
                     print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         data = await res.json()
