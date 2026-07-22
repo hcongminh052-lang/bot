@@ -20,6 +20,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+COHERE_API_KEY = "cohere_zJai2mbS3aUXjpb9DrRZSEnBctXbunyl3FooG9mP4Il2Cg"
 
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
@@ -50,18 +51,49 @@ def parse_best_answer(raw_text):
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
     
-    match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', target_text, re.IGNORECASE)
+    match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]{3,})', target_text, re.IGNORECASE)
     if match:
         target_text = match.group(1).strip()
         
     cleaned = clean_final_answer(target_text)
+    cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món(?: ăn)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+    
     words = cleaned.split()
     
-    if 1 <= len(words) <= 6:
+    if 1 <= len(words) <= 6 and len(cleaned) >= 3:
         return cleaned
     elif len(words) > 6:
         return " ".join(words[:4])
         
+    return None
+
+async def ask_cohere_api(clean_question):
+    if not COHERE_API_KEY:
+        return None
+
+    url = "https://api.cohere.com/v1/chat"
+    headers = {
+        "Authorization": f"Bearer {COHERE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "command-r-plus",
+        "message": f"Trả lời câu hỏi game sau. CHỈ XUẤT DUY NHẤT TÊN/ĐÁP ÁN (1-4 từ), không viết câu, không giải thích:\n\n{clean_question}",
+        "temperature": 0.1
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload, timeout=5) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    raw_text = data.get("text", "").strip()
+                    return parse_best_answer(raw_text)
+                else:
+                    print(f"  └─ ⚠️ [COHERE API] HTTP Status: {res.status}", flush=True)
+    except Exception as e:
+        print(f"  └─ ❌ [COHERE API ERROR]: {e}", flush=True)
+
     return None
 
 async def ask_gemini_rest(clean_question):
@@ -107,15 +139,16 @@ async def ask_duckduckgo_web(clean_question):
                     html_text = await res.text()
                     soup = BeautifulSoup(html_text, 'html.parser')
                     snippets = soup.find_all('a', class_='result__snippet')
-                    combined_text = " ".join([s.get_text() for s in snippets[:3]])
+                    combined_text = " ".join([s.get_text() for s in snippets[:4]])
                     
                     if combined_text:
-                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', combined_text, re.IGNORECASE)
+                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]{3,})', combined_text, re.IGNORECASE)
                         if match:
                             raw_found = match.group(1).strip()
                             cleaned = clean_final_answer(raw_found)
+                            cleaned = re.sub(r'^(món|là|của)\s+', '', cleaned, flags=re.IGNORECASE).strip()
                             words = cleaned.split()
-                            if 1 <= len(words) <= 5:
+                            if 1 <= len(words) <= 5 and len(cleaned) >= 3:
                                 return cleaned
     except Exception as e:
         print(f"  └─ ❌ [DDG WEB ERROR]: {e}", flush=True)
@@ -125,26 +158,16 @@ async def ask_duckduckgo_web(clean_question):
 async def ask_pollinations_fallback(clean_question):
     prompt = f"Trả lời câu hỏi game: {clean_question}. CHỈ XUẤT ĐÁP ÁN (1 đến 4 từ)."
     encoded_prompt = urllib.parse.quote(prompt)
+    url = f"https://text.pollinations.ai/{encoded_prompt}"
     
-    urls = [
-        f"https://text.pollinations.ai/{encoded_prompt}",
-        f"https://text.pollinations.ai/{encoded_prompt}?model=mistral"
-    ]
-    
-    async with aiohttp.ClientSession() as session:
-        for url in urls:
-            print(f"🌐 [POLLINATIONS] Gọi API: {url[:60]}...", flush=True)
-            try:
-                async with session.get(url, timeout=6) as res:
-                    if res.status == 200:
-                        raw_text = await res.text()
-                        ans = parse_best_answer(raw_text)
-                        if ans:
-                            return ans
-                    else:
-                        print(f"  └─ ⚠️ [POLLINATIONS] HTTP Status: {res.status}", flush=True)
-            except Exception as e:
-                print(f"  └─ ❌ [POLLINATIONS ERROR]: {e}", flush=True)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=6) as res:
+                if res.status == 200:
+                    raw_text = await res.text()
+                    return parse_best_answer(raw_text)
+    except Exception:
+        pass
                 
     return None
 
@@ -155,6 +178,11 @@ async def solve_question(question_text):
         
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
+
+    ans_cohere = await ask_cohere_api(clean_question)
+    if ans_cohere:
+        print(f"✅ [KẾT QUẢ COHERE]: {ans_cohere}\n============================================================\n", flush=True)
+        return ans_cohere
 
     ans_gemini = await ask_gemini_rest(clean_question)
     if ans_gemini:
