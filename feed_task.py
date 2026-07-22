@@ -76,9 +76,8 @@ async def ask_openrouter_api(clean_question):
     
     models = [
         "openrouter/auto",
-        "meta-llama/llama-3.1-8b-instruct:free",
-        "mistralai/mistral-small-24b-instruct-2501:free",
-        "qwen/qwen-2.5-7b-instruct:free"
+        "stepfun/step-1-8k:free",
+        "cognitivecomputations/dolphin-mixtral-8x7b:free"
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -87,34 +86,35 @@ async def ask_openrouter_api(clean_question):
                 "model": model,
                 "messages": [
                     {
-                        "role": "system",
-                        "content": "Bạn là trợ lý giải đố game. Nhiệm vụ của bạn là CHỈ xuất ra duy nhất tên/đáp án ngắn gọn (từ 1 đến 4 từ). Không viết câu hoàn chỉnh, không thêm lời mở đầu hay giải thích."
-                    },
-                    {
                         "role": "user",
-                        "content": f"Câu hỏi: {clean_question}\nĐáp án:"
+                        "content": f"Trả lời duy nhất tên/đáp án của câu hỏi sau (tối đa 1-4 từ), không viết câu hoàn chỉnh:\n\n{clean_question}"
                     }
                 ],
                 "temperature": 0.1,
-                "max_tokens": 20
+                "max_tokens": 30
             }
             try:
                 print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
-                async with session.post(url, headers=headers, json=payload, timeout=8) as res:
+                async with session.post(url, headers=headers, json=payload, timeout=10) as res:
                     print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         data = await res.json()
                         choices = data.get("choices", [])
                         if choices:
-                            raw_text = choices[0]["message"]["content"].strip()
-                            ans = parse_best_answer(raw_text)
-                            if ans:
-                                return ans
+                            message_obj = choices[0].get("message", {})
+                            raw_text = message_obj.get("content", "")
+                            if not raw_text and "text" in choices[0]:
+                                raw_text = choices[0]["text"]
+                            
+                            if raw_text:
+                                ans = parse_best_answer(raw_text.strip())
+                                if ans:
+                                    return ans
                     else:
                         err_text = await res.text()
                         print(f"  └─ ⚠️ [OPENROUTER ERR BODY]: {err_text[:150]}", flush=True)
             except Exception as e:
-                print(f"  └─ ❌ [OPENROUTER EXCEPTION]: {e}", flush=True)
+                print(f"  └─ ❌ [OPENROUTER EXCEPTION]: {type(e).__name__} - {e}", flush=True)
 
     return None
 
