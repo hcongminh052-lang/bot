@@ -10,6 +10,7 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
+from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1228264831870701648
 
@@ -43,10 +44,8 @@ def extract_real_question(text):
 
 def parse_best_answer(raw_text):
     if not raw_text:
-        print("  └─ ❌ [PARSE] raw_text rỗng/None", flush=True)
         return None
         
-    print(f"  ├─ 📄 [RAW OUTPUT]: {repr(raw_text)}", flush=True)
     text = re.sub(r'\*\*|__|\*|_|`', '', raw_text).strip()
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
@@ -54,25 +53,19 @@ def parse_best_answer(raw_text):
     match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', target_text, re.IGNORECASE)
     if match:
         target_text = match.group(1).strip()
-        print(f"  ├─ 🔍 [REGEX MATCH]: {repr(target_text)}", flush=True)
         
     cleaned = clean_final_answer(target_text)
     words = cleaned.split()
-    print(f"  ├─ 🧹 [CLEANED]: {repr(cleaned)} | Số từ: {len(words)}", flush=True)
     
     if 1 <= len(words) <= 6:
         return cleaned
     elif len(words) > 6:
-        truncated = " ".join(words[:4])
-        print(f"  ├─ ✂️ [TRUNCATED >6 từ]: {repr(truncated)}", flush=True)
-        return truncated
+        return " ".join(words[:4])
         
-    print("  └─ ❌ [PARSE] Không thể trích xuất được từ hợp lệ", flush=True)
     return None
 
 async def ask_gemini_rest(clean_question):
     if not GEMINI_API_KEY:
-        print("  └─ ⚠️ [GEMINI REST] Bỏ qua vì không tìm thấy GEMINI_API_KEY", flush=True)
         return None
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -84,11 +77,9 @@ async def ask_gemini_rest(clean_question):
         }]
     }
 
-    print(f"🌐 [GEMINI REST] Gửi request đến Gemini 2.0 Flash...", flush=True)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=5) as res:
-                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                 if res.status == 200:
                     data = await res.json()
                     candidates = data.get("candidates", [])
@@ -97,43 +88,69 @@ async def ask_gemini_rest(clean_question):
                         return parse_best_answer(raw_text)
                 elif res.status == 429:
                     print("  └─ ⚠️ [GEMINI REST] Bị Rate Limit (429)", flush=True)
-                else:
-                    err_body = await res.text()
-                    print(f"  └─ ❌ [GEMINI REST ERROR BODY]: {err_body[:200]}", flush=True)
     except Exception as e:
-        print(f"  └─ ❌ [GEMINI REST EXCEPTION]: {e}", flush=True)
+        print(f"  └─ ❌ [GEMINI REST ERROR]: {e}", flush=True)
 
     return None
 
+async def ask_duckduckgo_web(clean_question):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
+    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}"
+    print(f"🌐 [DDG WEB] Đang tìm kiếm trên Web...", flush=True)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=6) as res:
+                if res.status == 200:
+                    html_text = await res.text()
+                    soup = BeautifulSoup(html_text, 'html.parser')
+                    snippets = soup.find_all('a', class_='result__snippet')
+                    combined_text = " ".join([s.get_text() for s in snippets[:3]])
+                    
+                    if combined_text:
+                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', combined_text, re.IGNORECASE)
+                        if match:
+                            raw_found = match.group(1).strip()
+                            cleaned = clean_final_answer(raw_found)
+                            words = cleaned.split()
+                            if 1 <= len(words) <= 5:
+                                return cleaned
+    except Exception as e:
+        print(f"  └─ ❌ [DDG WEB ERROR]: {e}", flush=True)
+        
+    return None
+
 async def ask_pollinations_fallback(clean_question):
-    models = ["openai", "qwen-coder", "mistral"]
+    prompt = f"Trả lời câu hỏi game: {clean_question}. CHỈ XUẤT ĐÁP ÁN (1 đến 4 từ)."
+    encoded_prompt = urllib.parse.quote(prompt)
+    
+    urls = [
+        f"https://text.pollinations.ai/{encoded_prompt}",
+        f"https://text.pollinations.ai/{encoded_prompt}?model=mistral"
+    ]
     
     async with aiohttp.ClientSession() as session:
-        for model in models:
-            prompt = f"Question: {clean_question}\nOutput ONLY the precise answer name (1 to 4 words). No sentence, no explanation."
-            encoded_prompt = urllib.parse.quote(prompt)
-            url = f"https://text.pollinations.ai/{encoded_prompt}?model={model}"
-            
-            print(f"🌐 [POLLINATIONS] Gọi API Model: '{model}'...", flush=True)
-            print(f"  ├─ 🔗 [URL]: {url}", flush=True)
+        for url in urls:
+            print(f"🌐 [POLLINATIONS] Gọi API: {url[:60]}...", flush=True)
             try:
                 async with session.get(url, timeout=6) as res:
-                    print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         raw_text = await res.text()
                         ans = parse_best_answer(raw_text)
                         if ans:
                             return ans
                     else:
-                        print(f"  └─ ⚠️ [POLLINATIONS] HTTP {res.status}", flush=True)
+                        print(f"  └─ ⚠️ [POLLINATIONS] HTTP Status: {res.status}", flush=True)
             except Exception as e:
-                print(f"  └─ ❌ [POLLINATIONS EXCEPTION] Model {model}: {e}", flush=True)
+                print(f"  └─ ❌ [POLLINATIONS ERROR]: {e}", flush=True)
+                
     return None
 
 async def solve_question(question_text):
     clean_question = extract_real_question(question_text)
     if not clean_question:
-        print("⚠️ [SOLVE] Không thể trích xuất câu hỏi từ tin nhắn Discord.", flush=True)
         return None
         
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
@@ -143,6 +160,12 @@ async def solve_question(question_text):
     if ans_gemini:
         print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
+
+    print("⚠️ [FALLBACK] Chuyển sang DuckDuckGo Web Search...", flush=True)
+    ans_ddg = await ask_duckduckgo_web(clean_question)
+    if ans_ddg:
+        print(f"✅ [KẾT QUẢ DDG WEB]: {ans_ddg}\n============================================================\n", flush=True)
+        return ans_ddg
 
     print("⚠️ [FALLBACK] Chuyển sang Pollinations AI...", flush=True)
     ans_fallback = await ask_pollinations_fallback(clean_question)
