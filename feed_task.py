@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
-from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1228264831870701648
 
@@ -111,7 +110,7 @@ async def ask_openrouter_api(clean_question):
     return None
 
 async def ask_pollinations_fallback(clean_question):
-    prompt = f"CHỈ TRẢ VỀ ĐÁP ÁN NGHẮN (1-3 từ): {clean_question}"
+    prompt = f"CHỈ TRẢ VỀ ĐÁP ÁN NGẮN (1-3 từ): {clean_question}"
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://text.pollinations.ai/{encoded_prompt}"
     
@@ -124,35 +123,6 @@ async def ask_pollinations_fallback(clean_question):
     except Exception:
         pass
                 
-    return None
-
-async def ask_duckduckgo_web(clean_question):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    }
-    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=6) as res:
-                if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
-                    snippets = soup.find_all('a', class_='result__snippet')
-                    combined_text = " ".join([s.get_text() for s in snippets[:4]])
-                    
-                    if combined_text:
-                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', combined_text, re.IGNORECASE)
-                        if match:
-                            raw_found = match.group(1).strip()
-                            cleaned = clean_final_answer(raw_found)
-                            cleaned = re.sub(r'^(món|là|của)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-                            words = cleaned.split()
-                            if 1 <= len(words) <= 5:
-                                return cleaned
-    except Exception:
-        pass
-        
     return None
 
 async def solve_question(question_text):
@@ -173,11 +143,6 @@ async def solve_question(question_text):
         print(f"✅ [KẾT QUẢ POLLINATIONS]: {ans_fallback}\n============================================================\n", flush=True)
         return ans_fallback
 
-    ans_ddg = await ask_duckduckgo_web(clean_question)
-    if ans_ddg:
-        print(f"✅ [KẾT QUẢ DDG WEB]: {ans_ddg}\n============================================================\n", flush=True)
-        return ans_ddg
-        
     print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
     return None
 
