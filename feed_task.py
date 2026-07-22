@@ -46,7 +46,7 @@ def extract_real_question(text):
     return None
 
 async def ask_free_ai(clean_question):
-    prompt = f"Trả lời câu hỏi trắc nghiệm/game sau thật ngắn gọn. Chỉ trả về duy nhất tên/đáp án ngắn gọn (từ 1 đến 3 từ), tuyệt đối không thêm lời giải thích, không thêm dấu ngoặc hay chú thích nào khác.\n\nCâu hỏi: {clean_question}"
+    prompt = f"Trả lời câu hỏi trắc nghiệm/game sau thật ngắn gọn. Chỉ trả về duy nhất tên/đáp án ngắn gọn (từ 1 đến 4 từ), tuyệt đối không thêm lời giải thích, không thêm dấu ngoặc hay chú thích nào khác.\n\nCâu hỏi: {clean_question}"
     
     url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}"
     
@@ -125,18 +125,21 @@ async def setup_message_listener(bot_instance):
         if message.channel.id not in FEED_CHANNEL_IDS:
             return
 
-        if message.author.id == BOT_GAME_ID and message.embeds:
-            embed = message.embeds[0]
-            title = embed.title if embed.title else ""
-            description = embed.description if embed.description else ""
-            
-            if "CÂU HỎI FEED" in title or "Reply trực tiếp" in description:
-                print(f"🎯 [BOT GAME] Phát hiện câu hỏi tại kênh {message.channel.id}: {description}", flush=True)
+        if message.author.id == BOT_GAME_ID:
+            question_text = ""
+            if message.embeds:
+                embed = message.embeds[0]
+                question_text = embed.description if embed.description else (embed.title if embed.title else "")
+            else:
+                question_text = message.content
+
+            if question_text:
+                print(f"🎯 [BOT GAME] Phát hiện câu hỏi tại kênh {message.channel.id}: {question_text}", flush=True)
                 
-                answer = await solve_question(description)
+                answer = await solve_question(question_text)
                 
                 if answer:
-                    await asyncio.sleep(random.uniform(3.0, 5.0))
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
                     await message.reply(answer)
                     print(f"✅ [FEED] Đã tự động phản hồi đáp án tìm thấy: {answer}", flush=True)
                 else:
