@@ -22,6 +22,8 @@ IS_FEED_ENABLED = True
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 COHERE_API_KEY = "cohere_zJai2mbS3aUXjpb9DrRZSEnBctXbunyl3FooG9mP4Il2Cg"
 
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm"]
+
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'\[[^\]]*\]', '', text)
@@ -58,6 +60,9 @@ def parse_best_answer(raw_text):
     cleaned = clean_final_answer(target_text)
     cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món(?: ăn)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
     
+    if any(bad in cleaned.lower() for bad in BAD_WORDS):
+        return None
+
     words = cleaned.split()
     
     if 1 <= len(words) <= 6 and len(cleaned) >= 3:
@@ -67,32 +72,39 @@ def parse_best_answer(raw_text):
         
     return None
 
-async def ask_cohere_api(clean_question):
+async def ask_cohere_v2(clean_question):
     if not COHERE_API_KEY:
         return None
 
-    url = "https://api.cohere.com/v1/chat"
+    url = "https://api.cohere.com/v2/chat"
     headers = {
         "Authorization": f"Bearer {COHERE_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
         "model": "command-r-plus",
-        "message": f"Trả lời câu hỏi game sau. CHỈ XUẤT DUY NHẤT TÊN/ĐÁP ÁN (1-4 từ), không viết câu, không giải thích:\n\n{clean_question}",
-        "temperature": 0.1
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Trả lời câu hỏi game sau. CHỈ XUẤT DUY NHẤT TÊN/ĐÁP ÁN (1-4 từ), không viết câu, không giải thích:\n\n{clean_question}"
+            }
+        ]
     }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=5) as res:
+            async with session.post(url, headers=headers, json=payload, timeout=6) as res:
                 if res.status == 200:
                     data = await res.json()
-                    raw_text = data.get("text", "").strip()
-                    return parse_best_answer(raw_text)
+                    message = data.get("message", {})
+                    content = message.get("content", [])
+                    if content and len(content) > 0:
+                        raw_text = content[0].get("text", "").strip()
+                        return parse_best_answer(raw_text)
                 else:
-                    print(f"  └─ ⚠️ [COHERE API] HTTP Status: {res.status}", flush=True)
+                    print(f"  └─ ⚠️ [COHERE V2] Status: {res.status}", flush=True)
     except Exception as e:
-        print(f"  └─ ❌ [COHERE API ERROR]: {e}", flush=True)
+        print(f"  └─ ❌ [COHERE V2 ERROR]: {e}", flush=True)
 
     return None
 
@@ -147,9 +159,11 @@ async def ask_duckduckgo_web(clean_question):
                             raw_found = match.group(1).strip()
                             cleaned = clean_final_answer(raw_found)
                             cleaned = re.sub(r'^(món|là|của)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-                            words = cleaned.split()
-                            if 1 <= len(words) <= 5 and len(cleaned) >= 3:
-                                return cleaned
+                            
+                            if not any(bad in cleaned.lower() for bad in BAD_WORDS):
+                                words = cleaned.split()
+                                if 1 <= len(words) <= 5 and len(cleaned) >= 3:
+                                    return cleaned
     except Exception as e:
         print(f"  └─ ❌ [DDG WEB ERROR]: {e}", flush=True)
         
@@ -179,9 +193,9 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_cohere = await ask_cohere_api(clean_question)
+    ans_cohere = await ask_cohere_v2(clean_question)
     if ans_cohere:
-        print(f"✅ [KẾT QUẢ COHERE]: {ans_cohere}\n============================================================\n", flush=True)
+        print(f"✅ [KẾT QUẢ COHERE V2]: {ans_cohere}\n============================================================\n", flush=True)
         return ans_cohere
 
     ans_gemini = await ask_gemini_rest(clean_question)
@@ -189,17 +203,17 @@ async def solve_question(question_text):
         print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
 
-    print("⚠️ [FALLBACK] Chuyển sang DuckDuckGo Web Search...", flush=True)
-    ans_ddg = await ask_duckduckgo_web(clean_question)
-    if ans_ddg:
-        print(f"✅ [KẾT QUẢ DDG WEB]: {ans_ddg}\n============================================================\n", flush=True)
-        return ans_ddg
-
     print("⚠️ [FALLBACK] Chuyển sang Pollinations AI...", flush=True)
     ans_fallback = await ask_pollinations_fallback(clean_question)
     if ans_fallback:
         print(f"✅ [KẾT QUẢ POLLINATIONS]: {ans_fallback}\n============================================================\n", flush=True)
         return ans_fallback
+
+    print("⚠️ [FALLBACK] Chuyển sang DuckDuckGo Web Search...", flush=True)
+    ans_ddg = await ask_duckduckgo_web(clean_question)
+    if ans_ddg:
+        print(f"✅ [KẾT QUẢ DDG WEB]: {ans_ddg}\n============================================================\n", flush=True)
+        return ans_ddg
         
     print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
     return None
