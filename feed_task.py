@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
-import google.generativeai as genai
 
 BOT_GAME_ID = 1228264831870701648
 
@@ -19,13 +18,7 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    model_gemini = None
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
@@ -48,25 +41,38 @@ def extract_real_question(text):
             
     return None
 
-async def ask_gemini_solver(clean_question):
-    if not model_gemini:
-        print("⚠️ [GEMINI] Thiếu GEMINI_API_KEY trong biến môi trường!", flush=True)
+async def ask_gemini_rest(clean_question):
+    if not GEMINI_API_KEY:
+        print("⚠️ [GEMINI] Thiếu biến môi trường GEMINI_API_KEY!", flush=True)
         return None
 
-    prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng tên riêng/đáp án chuẩn xác nhất trong game (ưu tiên tên gốc tiếng Anh/Việt chuẩn của game). Chỉ xuất DUY NHẤT đáp án từ 1 đến 5 từ, không viết cả câu, không giải thích.\n\nCâu hỏi: {clean_question}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng tên riêng/đáp án chuẩn xác nhất trong game. Chỉ xuất DUY NHẤT đáp án từ 1 đến 5 từ, không viết thành câu, không giải thích.\n\nCâu hỏi: {clean_question}"
     
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+
     try:
-        response = await asyncio.to_thread(model_gemini.generate_content, prompt)
-        if response and response.text:
-            raw_ans = response.text.strip()
-            raw_clean = re.sub(r'\*\*|__|\*|_', '', raw_ans)
-            first_line = raw_clean.split('\n')[0].strip()
-            cleaned = clean_final_answer(first_line)
-            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-            if cleaned:
-                return cleaned
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=10) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        raw_text = candidates[0]["content"]["parts"][0]["text"].strip()
+                        raw_clean = re.sub(r'\*\*|__|\*|_', '', raw_text)
+                        first_line = raw_clean.split('\n')[0].strip()
+                        cleaned = clean_final_answer(first_line)
+                        cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+                        if cleaned:
+                            return cleaned
+                else:
+                    print(f"❌ [GEMINI REST] Lỗi HTTP status: {res.status}", flush=True)
     except Exception as e:
-        print(f"❌ [GEMINI] Lỗi truy vấn API: {e}", flush=True)
+        print(f"❌ [GEMINI REST] Lỗi kết nối: {e}", flush=True)
 
     return None
 
@@ -77,7 +83,7 @@ async def solve_question(question_text):
         
     print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
     
-    ans = await ask_gemini_solver(clean_question)
+    ans = await ask_gemini_rest(clean_question)
     if ans:
         print(f"✅ [AI] Tìm thấy đáp án: {ans}", flush=True)
         return ans
