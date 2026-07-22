@@ -21,6 +21,7 @@ IS_FEED_ENABLED = True
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "DAP_API_KEY_OPENROUTER_VAO_DAY_HOAC_O_ENV")
 
 def clean_final_answer(text):
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'\[[^\]]*\]', '', text)
     text = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]', '', text)
@@ -47,7 +48,8 @@ def parse_best_answer(raw_text):
         
     print(f"  ├─ 📄 [AI RAW RESPONSE]: {repr(raw_text)}", flush=True)
     
-    text = re.sub(r'\*\*|__|\*|_|`', '', raw_text).strip()
+    text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+    text = re.sub(r'\*\*|__|\*|_|`', '', text).strip()
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
     
@@ -63,6 +65,24 @@ def parse_best_answer(raw_text):
         
     return None
 
+async def fetch_free_openrouter_models(session):
+    url = "https://openrouter.ai/api/v1/models"
+    try:
+        async with session.get(url, timeout=5) as res:
+            if res.status == 200:
+                data = await res.json()
+                models_data = data.get("data", [])
+                free_models = [
+                    m["id"] for m in models_data 
+                    if m.get("id", "").endswith(":free") or 
+                       (m.get("pricing", {}).get("prompt") == "0" and m.get("pricing", {}).get("completion") == "0")
+                ]
+                if free_models:
+                    return free_models[:5]
+    except Exception:
+        pass
+    return ["openrouter/auto"]
+
 async def ask_openrouter_api(clean_question):
     if not OPENROUTER_API_KEY or "DAP_API_KEY" in OPENROUTER_API_KEY:
         print("  └─ ⚠️ [OPENROUTER] Chưa nhận diện được API Key hợp lệ.", flush=True)
@@ -73,25 +93,21 @@ async def ask_openrouter_api(clean_question):
         "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json"
     }
-    
-    models = [
-        "openrouter/auto",
-        "stepfun/step-1-8k:free",
-        "cognitivecomputations/dolphin-mixtral-8x7b:free"
-    ]
 
     async with aiohttp.ClientSession() as session:
+        models = await fetch_free_openrouter_models(session)
+        
         for model in models:
             payload = {
                 "model": model,
                 "messages": [
                     {
                         "role": "user",
-                        "content": f"Trả lời duy nhất tên/đáp án của câu hỏi sau (tối đa 1-4 từ), không viết câu hoàn chỉnh:\n\n{clean_question}"
+                        "content": f"Trả lời duy nhất tên/đáp án của câu hỏi sau (tối đa 1-4 từ), không viết câu hoàn chỉnh, không giải thích:\n\n{clean_question}"
                     }
                 ],
                 "temperature": 0.1,
-                "max_tokens": 30
+                "max_tokens": 60
             }
             try:
                 print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
