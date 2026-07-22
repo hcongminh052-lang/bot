@@ -18,7 +18,7 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "DAP_API_KEY_OPENROUTER_VAO_DAY_HOAC_O_ENV")
 
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
@@ -45,40 +45,40 @@ def parse_best_answer(raw_text):
     if not raw_text:
         return None
         
+    print(f"  ├─ 📄 [AI RAW RESPONSE]: {repr(raw_text)}", flush=True)
+    
     text = re.sub(r'\*\*|__|\*|_|`', '', raw_text).strip()
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
     
-    match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', target_text, re.IGNORECASE)
-    if match:
-        target_text = match.group(1).strip()
-        
+    target_text = re.sub(r'^(?:đáp án|câu trả lời|kết quả|tên món ăn)(?: là)?:\s*', '', target_text, flags=re.IGNORECASE)
+    
     cleaned = clean_final_answer(target_text)
-    cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món(?: ăn)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-
     words = cleaned.split()
     
-    if 1 <= len(words) <= 5:
+    if 1 <= len(words) <= 6 and len(cleaned) >= 2:
         return cleaned
-    elif len(words) > 5:
-        return " ".join(words[:3])
+    elif len(words) > 6:
+        return " ".join(words[:4])
         
     return None
 
 async def ask_openrouter_api(clean_question):
-    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.startswith("DAP_API_KEY"):
+    if not OPENROUTER_API_KEY or "DAP_API_KEY" in OPENROUTER_API_KEY:
+        print("  └─ ⚠️ [OPENROUTER] Chưa nhận diện được API Key hợp lệ.", flush=True)
         return None
 
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json"
     }
     
     models = [
         "google/gemma-2-9b-it:free",
         "meta-llama/llama-3.3-70b-instruct:free",
-        "qwen/qwen-2.5-7b-instruct:free"
+        "mistralai/mistral-7b-instruct:free",
+        "openchat/openchat-7b:free"
     ]
 
     async with aiohttp.ClientSession() as session:
@@ -87,15 +87,21 @@ async def ask_openrouter_api(clean_question):
                 "model": model,
                 "messages": [
                     {
+                        "role": "system",
+                        "content": "Bạn là trợ lý giải đố game. Nhiệm vụ của bạn là CHỈ xuất ra duy nhất tên/đáp án ngắn gọn (từ 1 đến 4 từ). Không viết câu hoàn chỉnh, không thêm lời mở đầu hay giải thích."
+                    },
+                    {
                         "role": "user",
-                        "content": f"CHỈ TRẢ LỜI DUY NHẤT TÊN/ĐÁP ÁN KHÔNG GIẢI THÍCH (1-3 TỪ):\n{clean_question}"
+                        "content": f"Câu hỏi: {clean_question}\nĐáp án:"
                     }
                 ],
                 "temperature": 0.1,
-                "max_tokens": 15
+                "max_tokens": 20
             }
             try:
-                async with session.post(url, headers=headers, json=payload, timeout=5) as res:
+                print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
+                async with session.post(url, headers=headers, json=payload, timeout=6) as res:
+                    print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         data = await res.json()
                         choices = data.get("choices", [])
@@ -104,24 +110,29 @@ async def ask_openrouter_api(clean_question):
                             ans = parse_best_answer(raw_text)
                             if ans:
                                 return ans
-            except Exception:
-                pass
+                    else:
+                        err_text = await res.text()
+                        print(f"  └─ ⚠️ [OPENROUTER ERR BODY]: {err_text[:150]}", flush=True)
+            except Exception as e:
+                print(f"  └─ ❌ [OPENROUTER EXCEPTION]: {e}", flush=True)
 
     return None
 
 async def ask_pollinations_fallback(clean_question):
-    prompt = f"CHỈ TRẢ VỀ ĐÁP ÁN NGẮN (1-3 từ): {clean_question}"
+    prompt = f"Question: {clean_question}\nAnswer ONLY the exact short name (1-3 words):"
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://text.pollinations.ai/{encoded_prompt}"
     
     try:
+        print(f"🌐 [POLLINATIONS] Gửi request fallback...", flush=True)
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=5) as res:
+                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                 if res.status == 200:
                     raw_text = await res.text()
                     return parse_best_answer(raw_text)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  └─ ❌ [POLLINATIONS EXCEPTION]: {e}", flush=True)
                 
     return None
 
