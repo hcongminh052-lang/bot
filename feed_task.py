@@ -19,17 +19,6 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-KNOWN_GAME_ANSWERS = {
-    "món ăn đặc biệt của furina": "Pour la Justice",
-    "vũ khí của koto": "Shuriken",
-    "mẹ ruột của mikoto": "Kamui"
-}
-
-def is_valid_time():
-    tz = pytz.timezone('Asia/Ho_Chi_Minh')
-    now = datetime.now(tz)
-    return 8 <= now.hour < 22
-
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'\[[^\]]*\]', '', text)
@@ -59,7 +48,7 @@ async def fetch_pollinations(prompt, model=None):
         
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=6) as res:
+            async with session.get(url, timeout=8) as res:
                 if res.status == 200:
                     return await res.text()
     except Exception:
@@ -67,13 +56,9 @@ async def fetch_pollinations(prompt, model=None):
     return None
 
 async def ask_ai_solver(clean_question):
-    for key, val in KNOWN_GAME_ANSWERS.items():
-        if key in clean_question.lower():
-            return val
-
-    prompt = f"Trả lời câu hỏi trắc nghiệm game này bằng Tiếng Việt hoặc tên riêng chuẩn. CHỈ XUẤT ĐÁP ÁN (1 đến 4 từ), tuyệt đối không ghi thêm từ thừa, không giải thích. Câu hỏi: {clean_question}"
+    prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng Tiếng Việt hoặc tên riêng chính xác. CHỈ TRẢ VỀ ĐÁP ÁN (từ 1 đến 5 từ). Không thêm lời dẫn, không giải thích. Câu hỏi: {clean_question}"
     
-    models = [None, "qwen-coder", "mistral"]
+    models = [None, "openai", "qwen-coder", "mistral"]
     
     for model in models:
         raw_response = await fetch_pollinations(prompt, model)
@@ -85,7 +70,7 @@ async def ask_ai_solver(clean_question):
                 cleaned = match.group(1).strip()
                 
             words = cleaned.split()
-            if 1 <= len(words) <= 6:
+            if 1 <= len(words) <= 7:
                 return cleaned
 
     return None
@@ -107,9 +92,6 @@ async def solve_question(question_text):
 @tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
     if not IS_FEED_ENABLED:
-        return
-
-    if not is_valid_time():
         return
 
     chosen_channel_id = random.choice(FEED_CHANNEL_IDS)
