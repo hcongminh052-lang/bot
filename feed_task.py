@@ -43,16 +43,11 @@ def extract_real_question(text):
 
 async def ask_gemini_rest(clean_question):
     if not GEMINI_API_KEY:
-        print("⚠️ [GEMINI] Thiếu biến môi trường GEMINI_API_KEY!", flush=True)
         return None
 
-    models_to_try = [
-        "gemini-2.0-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-1.5-pro"
-    ]
-
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng tên riêng/đáp án chuẩn xác nhất trong game. Chỉ xuất DUY NHẤT đáp án từ 1 đến 5 từ, không viết thành câu, không giải thích.\n\nCâu hỏi: {clean_question}"
+    
     payload = {
         "contents": [{
             "parts": [{"text": prompt}]
@@ -60,8 +55,7 @@ async def ask_gemini_rest(clean_question):
     }
 
     async with aiohttp.ClientSession() as session:
-        for model in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+        for attempt in range(3):
             try:
                 async with session.post(url, json=payload, timeout=8) as res:
                     if res.status == 200:
@@ -75,11 +69,34 @@ async def ask_gemini_rest(clean_question):
                             cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
                             if cleaned:
                                 return cleaned
+                    elif res.status == 429:
+                        print(f"⚠️ [GEMINI REST] Bị Rate Limit (429), thử lại lần {attempt + 1}/3...", flush=True)
+                        await asyncio.sleep(2.0)
                     else:
-                        print(f"⚠️ [GEMINI REST] Model {model} trả về lỗi HTTP: {res.status}", flush=True)
+                        print(f"⚠️ [GEMINI REST] Lỗi HTTP: {res.status}", flush=True)
+                        break
             except Exception as e:
-                print(f"❌ [GEMINI REST] Lỗi kết nối {model}: {e}", flush=True)
+                print(f"❌ [GEMINI REST] Lỗi kết nối: {e}", flush=True)
+                break
 
+    return None
+
+async def ask_pollinations_fallback(clean_question):
+    prompt = f"Trả lời cực ngắn câu hỏi game này bằng Tiếng Việt hoặc tên riêng chuẩn. CHỈ TRẢ VỀ ĐÁP ÁN, không giải thích: {clean_question}"
+    url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=7) as res:
+                if res.status == 200:
+                    raw_text = await res.text()
+                    cleaned = clean_final_answer(raw_text)
+                    cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+                    words = cleaned.split()
+                    if 1 <= len(words) <= 6:
+                        return cleaned
+    except Exception:
+        pass
     return None
 
 async def solve_question(question_text):
@@ -91,8 +108,14 @@ async def solve_question(question_text):
     
     ans = await ask_gemini_rest(clean_question)
     if ans:
-        print(f"✅ [AI] Tìm thấy đáp án: {ans}", flush=True)
+        print(f"✅ [GEMINI] Tìm thấy đáp án: {ans}", flush=True)
         return ans
+        
+    print("⚠️ [GEMINI] Lỗi hoặc hết Quota, chuyển sang Pollinations fallback...", flush=True)
+    ans_fallback = await ask_pollinations_fallback(clean_question)
+    if ans_fallback:
+        print(f"✅ [FALLBACK] Tìm thấy đáp án: {ans_fallback}", flush=True)
+        return ans_fallback
         
     return None
 
