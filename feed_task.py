@@ -10,7 +10,6 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
-from bs4 import BeautifulSoup
 
 BOT_GAME_ID = 1228264831870701648
 
@@ -46,42 +45,13 @@ def extract_real_question(text):
             
     return None
 
-async def duckduckgo_search_answer(clean_question):
-    url = "https://lite.duckduckgo.com/lite/"
-    data = {"q": clean_question}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
+async def ask_ai_solver(clean_question):
+    prompt = f"Bạn là hệ thống giải đố game chuyên nghiệp. Hãy trả lời câu hỏi sau thật chính xác. CHỈ TRẢ VỀ DUY NHẤT TÊN/ĐÁP ÁN CHÍNH XÁC. Không trả lời thành câu, không giải thích, không viết thêm từ thừa.\n\nCâu hỏi: {clean_question}"
+    url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}"
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=data, headers=headers, timeout=5) as res:
-                if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
-                    
-                    for td in soup.find_all('td', class_='result-snippet'):
-                        snippet_text = td.get_text().strip()
-                        match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\(\)\[\]]+)', snippet_text)
-                        if match:
-                            raw_ans = match.group(1).strip()
-                            final_ans = clean_final_answer(raw_ans)
-                            words = final_ans.split()
-                            if 1 <= len(words) <= 5:
-                                return final_ans
-    except Exception:
-        pass
-        
-    return None
-
-async def ask_free_ai(clean_question):
-    sys_prompt = "You are a quiz solver. Output ONLY the answer phrase. Maximum 6 words. No explanation, no punctuation."
-    url = f"https://text.pollinations.ai/{urllib.parse.quote(clean_question)}?system={urllib.parse.quote(sys_prompt)}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as res:
+            async with session.get(url, timeout=8) as res:
                 if res.status == 200:
                     raw_response = await res.text()
                     cleaned = clean_final_answer(raw_response)
@@ -91,7 +61,7 @@ async def ask_free_ai(clean_question):
                         cleaned = match.group(1).strip()
                         
                     words = cleaned.split()
-                    if 1 <= len(words) <= 7:
+                    if 1 <= len(words) <= 6:
                         return cleaned
     except Exception:
         pass
@@ -105,16 +75,10 @@ async def solve_question(question_text):
         
     print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
     
-    ans = await duckduckgo_search_answer(clean_question)
+    ans = await ask_ai_solver(clean_question)
     if ans:
-        print(f"✅ [DDG] Tìm thấy đáp án: {ans}", flush=True)
+        print(f"✅ [AI] Tìm thấy đáp án: {ans}", flush=True)
         return ans
-        
-    print("⚠️ [DDG] Không tìm thấy, chuyển sang AI fallback...", flush=True)
-    ans_ai = await ask_free_ai(clean_question)
-    if ans_ai:
-        print(f"✅ [AI] Tìm thấy đáp án: {ans_ai}", flush=True)
-        return ans_ai
         
     return None
 
