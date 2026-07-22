@@ -46,9 +46,12 @@ async def fetch_pollinations(prompt, model=None):
     if model:
         url += f"?model={model}"
         
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=8) as res:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
+            async with session.get(url, headers=headers, timeout=8) as res:
                 if res.status == 200:
                     return await res.text()
     except Exception:
@@ -56,19 +59,20 @@ async def fetch_pollinations(prompt, model=None):
     return None
 
 async def ask_ai_solver(clean_question):
-    prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng Tiếng Việt hoặc tên riêng chính xác. CHỈ TRẢ VỀ ĐÁP ÁN (từ 1 đến 5 từ). Không thêm lời dẫn, không giải thích. Câu hỏi: {clean_question}"
+    prompt = f"Câu hỏi: {clean_question}\nYêu cầu: Chỉ trả về ĐÚNG TÊN/ĐÁP ÁN (từ 1 đến 6 từ). KHÔNG TRẢ LỜI THÀNH CÂU. KHÔNG GIẢI THÍCH."
     
-    models = [None, "openai", "qwen-coder", "mistral"]
+    models = [None, "openai", "mistral"]
     
     for model in models:
         raw_response = await fetch_pollinations(prompt, model)
         if raw_response:
-            cleaned = clean_final_answer(raw_response)
+            raw_response = re.sub(r'\*\*|__|\*|_', '', raw_response)
+            first_line = raw_response.split('\n')[0].strip()
             
-            match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là|đáp án|tên)\s+(.*)', cleaned, re.IGNORECASE)
-            if match:
-                cleaned = match.group(1).strip()
-                
+            cleaned = clean_final_answer(first_line)
+            
+            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+            
             words = cleaned.split()
             if 1 <= len(words) <= 7:
                 return cleaned
