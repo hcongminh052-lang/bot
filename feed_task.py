@@ -19,10 +19,7 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-COHERE_API_KEY = "cohere_zJai2mbS3aUXjpb9DrRZSEnBctXbunyl3FooG9mP4Il2Cg"
-
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm"]
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
@@ -53,88 +50,80 @@ def parse_best_answer(raw_text):
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
     
-    match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]{3,})', target_text, re.IGNORECASE)
+    match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', target_text, re.IGNORECASE)
     if match:
         target_text = match.group(1).strip()
         
     cleaned = clean_final_answer(target_text)
     cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món(?: ăn)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-    
-    if any(bad in cleaned.lower() for bad in BAD_WORDS):
-        return None
 
     words = cleaned.split()
     
-    if 1 <= len(words) <= 6 and len(cleaned) >= 3:
+    if 1 <= len(words) <= 5:
         return cleaned
-    elif len(words) > 6:
-        return " ".join(words[:4])
+    elif len(words) > 5:
+        return " ".join(words[:3])
         
     return None
 
-async def ask_cohere_v2(clean_question):
-    if not COHERE_API_KEY:
+async def ask_openrouter_api(clean_question):
+    if not OPENROUTER_API_KEY or OPENROUTER_API_KEY.startswith("DAP_API_KEY"):
         return None
 
-    url = "https://api.cohere.com/v2/chat"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {COHERE_API_KEY}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "model": "command-r-plus",
-        "messages": [
-            {
-                "role": "user",
-                "content": f"Trả lời câu hỏi game sau. CHỈ XUẤT DUY NHẤT TÊN/ĐÁP ÁN (1-4 từ), không viết câu, không giải thích:\n\n{clean_question}"
-            }
-        ]
-    }
+    
+    models = [
+        "google/gemma-2-9b-it:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen-2.5-7b-instruct:free"
+    ]
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload, timeout=6) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    message = data.get("message", {})
-                    content = message.get("content", [])
-                    if content and len(content) > 0:
-                        raw_text = content[0].get("text", "").strip()
-                        return parse_best_answer(raw_text)
-                else:
-                    print(f"  └─ ⚠️ [COHERE V2] Status: {res.status}", flush=True)
-    except Exception as e:
-        print(f"  └─ ❌ [COHERE V2 ERROR]: {e}", flush=True)
+    async with aiohttp.ClientSession() as session:
+        for model in models:
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"CHỈ TRẢ LỜI DUY NHẤT TÊN/ĐÁP ÁN KHÔNG GIẢI THÍCH (1-3 TỪ):\n{clean_question}"
+                    }
+                ],
+                "temperature": 0.1,
+                "max_tokens": 15
+            }
+            try:
+                async with session.post(url, headers=headers, json=payload, timeout=5) as res:
+                    if res.status == 200:
+                        data = await res.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            raw_text = choices[0]["message"]["content"].strip()
+                            ans = parse_best_answer(raw_text)
+                            if ans:
+                                return ans
+            except Exception:
+                pass
 
     return None
 
-async def ask_gemini_rest(clean_question):
-    if not GEMINI_API_KEY:
-        return None
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-    prompt = f"Trả lời câu hỏi game sau. CHỈ XUẤT DUY NHẤT TÊN/ĐÁP ÁN (1-4 từ), không viết câu:\n\n{clean_question}"
+async def ask_pollinations_fallback(clean_question):
+    prompt = f"CHỈ TRẢ VỀ ĐÁP ÁN NGHẮN (1-3 từ): {clean_question}"
+    encoded_prompt = urllib.parse.quote(prompt)
+    url = f"https://text.pollinations.ai/{encoded_prompt}"
     
-    payload = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }]
-    }
-
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=5) as res:
+            async with session.get(url, timeout=5) as res:
                 if res.status == 200:
-                    data = await res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        raw_text = candidates[0]["content"]["parts"][0]["text"].strip()
-                        return parse_best_answer(raw_text)
-                elif res.status == 429:
-                    print("  └─ ⚠️ [GEMINI REST] Bị Rate Limit (429)", flush=True)
-    except Exception as e:
-        print(f"  └─ ❌ [GEMINI REST ERROR]: {e}", flush=True)
-
+                    raw_text = await res.text()
+                    return parse_best_answer(raw_text)
+    except Exception:
+        pass
+                
     return None
 
 async def ask_duckduckgo_web(clean_question):
@@ -142,7 +131,6 @@ async def ask_duckduckgo_web(clean_question):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
     url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}"
-    print(f"🌐 [DDG WEB] Đang tìm kiếm trên Web...", flush=True)
     
     try:
         async with aiohttp.ClientSession() as session:
@@ -154,35 +142,17 @@ async def ask_duckduckgo_web(clean_question):
                     combined_text = " ".join([s.get_text() for s in snippets[:4]])
                     
                     if combined_text:
-                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]{3,})', combined_text, re.IGNORECASE)
+                        match = re.search(r'(?:là|có tên là|tên là|món ăn đặc biệt(?: của [^là]+)? là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', combined_text, re.IGNORECASE)
                         if match:
                             raw_found = match.group(1).strip()
                             cleaned = clean_final_answer(raw_found)
                             cleaned = re.sub(r'^(món|là|của)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-                            
-                            if not any(bad in cleaned.lower() for bad in BAD_WORDS):
-                                words = cleaned.split()
-                                if 1 <= len(words) <= 5 and len(cleaned) >= 3:
-                                    return cleaned
-    except Exception as e:
-        print(f"  └─ ❌ [DDG WEB ERROR]: {e}", flush=True)
-        
-    return None
-
-async def ask_pollinations_fallback(clean_question):
-    prompt = f"Trả lời câu hỏi game: {clean_question}. CHỈ XUẤT ĐÁP ÁN (1 đến 4 từ)."
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = f"https://text.pollinations.ai/{encoded_prompt}"
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=6) as res:
-                if res.status == 200:
-                    raw_text = await res.text()
-                    return parse_best_answer(raw_text)
+                            words = cleaned.split()
+                            if 1 <= len(words) <= 5:
+                                return cleaned
     except Exception:
         pass
-                
+        
     return None
 
 async def solve_question(question_text):
@@ -193,23 +163,16 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_cohere = await ask_cohere_v2(clean_question)
-    if ans_cohere:
-        print(f"✅ [KẾT QUẢ COHERE V2]: {ans_cohere}\n============================================================\n", flush=True)
-        return ans_cohere
+    ans_openrouter = await ask_openrouter_api(clean_question)
+    if ans_openrouter:
+        print(f"✅ [KẾT QUẢ OPENROUTER]: {ans_openrouter}\n============================================================\n", flush=True)
+        return ans_openrouter
 
-    ans_gemini = await ask_gemini_rest(clean_question)
-    if ans_gemini:
-        print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
-        return ans_gemini
-
-    print("⚠️ [FALLBACK] Chuyển sang Pollinations AI...", flush=True)
     ans_fallback = await ask_pollinations_fallback(clean_question)
     if ans_fallback:
         print(f"✅ [KẾT QUẢ POLLINATIONS]: {ans_fallback}\n============================================================\n", flush=True)
         return ans_fallback
 
-    print("⚠️ [FALLBACK] Chuyển sang DuckDuckGo Web Search...", flush=True)
     ans_ddg = await ask_duckduckgo_web(clean_question)
     if ans_ddg:
         print(f"✅ [KẾT QUẢ DDG WEB]: {ans_ddg}\n============================================================\n", flush=True)
