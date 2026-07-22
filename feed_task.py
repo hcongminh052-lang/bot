@@ -10,6 +10,7 @@ from discord.ext import commands, tasks
 from datetime import datetime
 import io
 import aiohttp
+import google.generativeai as genai
 
 BOT_GAME_ID = 1228264831870701648
 
@@ -18,6 +19,13 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
+
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    model_gemini = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    model_gemini = None
 
 def clean_final_answer(text):
     text = re.sub(r'\([^)]*\)', '', text)
@@ -40,46 +48,25 @@ def extract_real_question(text):
             
     return None
 
-async def fetch_pollinations(prompt, model=None):
-    encoded_prompt = urllib.parse.quote(prompt)
-    url = f"https://text.pollinations.ai/{encoded_prompt}"
-    if model:
-        url += f"?model={model}"
-        
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    }
-    try:
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as session:
-            async with session.get(url, headers=headers, timeout=8) as res:
-                if res.status == 200:
-                    return await res.text()
-    except Exception:
-        pass
-    return None
+async def ask_gemini_solver(clean_question):
+    if not model_gemini:
+        print("⚠️ [GEMINI] Thiếu GEMINI_API_KEY trong biến môi trường!", flush=True)
+        return None
 
-async def ask_ai_solver(clean_question):
-    prompt = f"Câu hỏi trivia game: {clean_question}\nHãy trả lời đáp án ngắn gọn nhất. Đặt đáp án chính xác duy nhất bên trong thẻ <ans> và </ans>. Ví dụ: <ans>Pour la Justice</ans>"
+    prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng tên riêng/đáp án chuẩn xác nhất trong game (ưu tiên tên gốc tiếng Anh/Việt chuẩn của game). Chỉ xuất DUY NHẤT đáp án từ 1 đến 5 từ, không viết cả câu, không giải thích.\n\nCâu hỏi: {clean_question}"
     
-    models = [None, "openai", "mistral"]
-    
-    for model in models:
-        raw_response = await fetch_pollinations(prompt, model)
-        if raw_response:
-            match = re.search(r'<ans>(.*?)</ans>', raw_response, re.DOTALL | re.IGNORECASE)
-            if match:
-                ans_text = match.group(1).strip()
-                cleaned = clean_final_answer(ans_text)
-                if cleaned:
-                    return cleaned
-            
-            raw_clean = re.sub(r'\*\*|__|\*|_', '', raw_response)
+    try:
+        response = await asyncio.to_thread(model_gemini.generate_content, prompt)
+        if response and response.text:
+            raw_ans = response.text.strip()
+            raw_clean = re.sub(r'\*\*|__|\*|_', '', raw_ans)
             first_line = raw_clean.split('\n')[0].strip()
             cleaned = clean_final_answer(first_line)
-            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món ăn(?: đặc biệt)?(?: là)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-            
-            if cleaned and len(cleaned.split()) <= 10:
+            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+            if cleaned:
                 return cleaned
+    except Exception as e:
+        print(f"❌ [GEMINI] Lỗi truy vấn API: {e}", flush=True)
 
     return None
 
@@ -90,7 +77,7 @@ async def solve_question(question_text):
         
     print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
     
-    ans = await ask_ai_solver(clean_question)
+    ans = await ask_gemini_solver(clean_question)
     if ans:
         print(f"✅ [AI] Tìm thấy đáp án: {ans}", flush=True)
         return ans
