@@ -11,10 +11,10 @@ from datetime import datetime
 import io
 import aiohttp
 
-BOT_GAME_ID = 1381506157591527464
+BOT_GAME_ID = 1228264831870701648
 
 FEED_CHANNEL_IDS = [
-    1214564167520886804
+    1292304060342603840
 ]
 
 IS_FEED_ENABLED = True
@@ -45,38 +45,22 @@ def extract_real_question(text):
             
     return None
 
-async def query_duckduckgo_ai(clean_question):
-    url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(clean_question)}&format=json&kl=wt-wt"
+async def ask_free_ai(clean_question):
+    prompt = f"Trả lời câu hỏi trắc nghiệm/game sau thật ngắn gọn. Chỉ trả về duy nhất tên/đáp án ngắn gọn (từ 1 đến 3 từ), tuyệt đối không thêm lời giải thích, không thêm dấu ngoặc hay chú thích nào khác.\n\nCâu hỏi: {clean_question}"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
+    url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}"
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=5) as res:
+            async with session.get(url, timeout=7) as res:
                 if res.status == 200:
-                    data = await res.json()
-                    
-                    answer_text = data.get("AbstractText") or data.get("Answer")
-                    
-                    if not answer_text and data.get("RelatedTopics"):
-                        for topic in data["RelatedTopics"]:
-                            if "Text" in topic:
-                                answer_text = topic["Text"]
-                                break
-                                
-                    if answer_text:
-                        match = re.search(r'(?:is the| là| có tên| tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s]+)', answer_text)
-                        if match:
-                            return clean_final_answer(match.group(1))
-                            
-                        cleaned = clean_final_answer(answer_text)
-                        words = cleaned.split()
-                        if 1 <= len(words) <= 4:
-                            return cleaned
+                    raw_response = await res.text()
+                    answer = clean_final_answer(raw_response)
+                    words = answer.split()
+                    if 1 <= len(words) <= 5:
+                        return answer
     except Exception as e:
-        print(f"❌ [AI QUERY] Lỗi truy vấn API: {e}", flush=True)
+        print(f"❌ [FREE AI] Lỗi truy vấn AI Service: {e}", flush=True)
         
     return None
 
@@ -86,7 +70,7 @@ async def solve_question(question_text):
         return None
         
     print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
-    return await query_duckduckgo_ai(clean_question)
+    return await ask_free_ai(clean_question)
 
 @tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
