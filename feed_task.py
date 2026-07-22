@@ -43,8 +43,10 @@ def extract_real_question(text):
 
 def parse_best_answer(raw_text):
     if not raw_text:
+        print("  └─ ❌ [PARSE] raw_text rỗng/None", flush=True)
         return None
         
+    print(f"  ├─ 📄 [RAW OUTPUT]: {repr(raw_text)}", flush=True)
     text = re.sub(r'\*\*|__|\*|_|`', '', raw_text).strip()
     lines = [l.strip() for l in text.split('\n') if l.strip()]
     target_text = lines[0] if lines else text
@@ -52,19 +54,25 @@ def parse_best_answer(raw_text):
     match = re.search(r'(?:là|có tên là|tên là|gọi là|chính là|đáp án|đáp án là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]+)', target_text, re.IGNORECASE)
     if match:
         target_text = match.group(1).strip()
+        print(f"  ├─ 🔍 [REGEX MATCH]: {repr(target_text)}", flush=True)
         
     cleaned = clean_final_answer(target_text)
     words = cleaned.split()
+    print(f"  ├─ 🧹 [CLEANED]: {repr(cleaned)} | Số từ: {len(words)}", flush=True)
     
     if 1 <= len(words) <= 6:
         return cleaned
     elif len(words) > 6:
-        return " ".join(words[:4])
+        truncated = " ".join(words[:4])
+        print(f"  ├─ ✂️ [TRUNCATED >6 từ]: {repr(truncated)}", flush=True)
+        return truncated
         
+    print("  └─ ❌ [PARSE] Không thể trích xuất được từ hợp lệ", flush=True)
     return None
 
 async def ask_gemini_rest(clean_question):
     if not GEMINI_API_KEY:
+        print("  └─ ⚠️ [GEMINI REST] Bỏ qua vì không tìm thấy GEMINI_API_KEY", flush=True)
         return None
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -76,9 +84,11 @@ async def ask_gemini_rest(clean_question):
         }]
     }
 
+    print(f"🌐 [GEMINI REST] Gửi request đến Gemini 2.0 Flash...", flush=True)
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=5) as res:
+                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                 if res.status == 200:
                     data = await res.json()
                     candidates = data.get("candidates", [])
@@ -86,9 +96,12 @@ async def ask_gemini_rest(clean_question):
                         raw_text = candidates[0]["content"]["parts"][0]["text"].strip()
                         return parse_best_answer(raw_text)
                 elif res.status == 429:
-                    print("⚠️ [GEMINI REST] Bị Rate Limit (429), chuyển sang Pollinations...", flush=True)
-    except Exception:
-        pass
+                    print("  └─ ⚠️ [GEMINI REST] Bị Rate Limit (429)", flush=True)
+                else:
+                    err_body = await res.text()
+                    print(f"  └─ ❌ [GEMINI REST ERROR BODY]: {err_body[:200]}", flush=True)
+    except Exception as e:
+        print(f"  └─ ❌ [GEMINI REST EXCEPTION]: {e}", flush=True)
 
     return None
 
@@ -98,36 +111,46 @@ async def ask_pollinations_fallback(clean_question):
     async with aiohttp.ClientSession() as session:
         for model in models:
             prompt = f"Question: {clean_question}\nOutput ONLY the precise answer name (1 to 4 words). No sentence, no explanation."
-            url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}?model={model}"
+            encoded_prompt = urllib.parse.quote(prompt)
+            url = f"https://text.pollinations.ai/{encoded_prompt}?model={model}"
+            
+            print(f"🌐 [POLLINATIONS] Gọi API Model: '{model}'...", flush=True)
+            print(f"  ├─ 🔗 [URL]: {url}", flush=True)
             try:
                 async with session.get(url, timeout=6) as res:
+                    print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
                     if res.status == 200:
                         raw_text = await res.text()
                         ans = parse_best_answer(raw_text)
                         if ans:
                             return ans
-            except Exception:
-                pass
+                    else:
+                        print(f"  └─ ⚠️ [POLLINATIONS] HTTP {res.status}", flush=True)
+            except Exception as e:
+                print(f"  └─ ❌ [POLLINATIONS EXCEPTION] Model {model}: {e}", flush=True)
     return None
 
 async def solve_question(question_text):
     clean_question = extract_real_question(question_text)
     if not clean_question:
+        print("⚠️ [SOLVE] Không thể trích xuất câu hỏi từ tin nhắn Discord.", flush=True)
         return None
         
-    print(f"🔍 [SEARCH] Đang xử lý câu hỏi: {clean_question}", flush=True)
+    print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
+    print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
     ans_gemini = await ask_gemini_rest(clean_question)
     if ans_gemini:
-        print(f"✅ [GEMINI] Tìm thấy đáp án: {ans_gemini}", flush=True)
+        print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
 
-    print("⚠️ [FALLBACK] Chuyển sang Pollinations AI bóc tách sâu...", flush=True)
+    print("⚠️ [FALLBACK] Chuyển sang Pollinations AI...", flush=True)
     ans_fallback = await ask_pollinations_fallback(clean_question)
     if ans_fallback:
-        print(f"✅ [POLLINATIONS] Tìm thấy đáp án: {ans_fallback}", flush=True)
+        print(f"✅ [KẾT QUẢ POLLINATIONS]: {ans_fallback}\n============================================================\n", flush=True)
         return ans_fallback
         
+    print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
     return None
 
 @tasks.loop(hours=4, minutes=30)
