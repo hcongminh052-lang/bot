@@ -70,30 +70,31 @@ async def duckduckgo_search_answer(clean_question):
                             words = final_ans.split()
                             if 1 <= len(words) <= 5:
                                 return final_ans
-    except Exception as e:
-        print(f"❌ [DDG] Lỗi trích xuất: {e}", flush=True)
+    except Exception:
+        pass
         
     return None
 
 async def ask_free_ai(clean_question):
-    prompt = f"Trả lời cực kỳ ngắn gọn. Chỉ trả về duy nhất tên/đáp án. Câu hỏi: {clean_question}"
-    url = f"https://text.pollinations.ai/{urllib.parse.quote(prompt)}"
+    sys_prompt = "You are a quiz solver. Output ONLY the answer phrase. Maximum 6 words. No explanation, no punctuation."
+    url = f"https://text.pollinations.ai/{urllib.parse.quote(clean_question)}?system={urllib.parse.quote(sys_prompt)}"
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=7) as res:
+            async with session.get(url, timeout=10) as res:
                 if res.status == 200:
                     raw_response = await res.text()
-                    match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠ][a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s]+)', raw_response)
+                    cleaned = clean_final_answer(raw_response)
+                    
+                    match = re.search(r'(?:có tên là|tên là|gọi là|chính là|là|đáp án|tên)\s+(.*)', cleaned, re.IGNORECASE)
                     if match:
-                        raw_response = match.group(1)
+                        cleaned = match.group(1).strip()
                         
-                    answer = clean_final_answer(raw_response)
-                    words = answer.split()
-                    if 1 <= len(words) <= 6:
-                        return answer
-    except Exception as e:
-        print(f"❌ [FREE AI] Lỗi truy vấn AI Service: {e}", flush=True)
+                    words = cleaned.split()
+                    if 1 <= len(words) <= 7:
+                        return cleaned
+    except Exception:
+        pass
         
     return None
 
@@ -106,20 +107,23 @@ async def solve_question(question_text):
     
     ans = await duckduckgo_search_answer(clean_question)
     if ans:
-        print(f"✅ [DDG] Tìm thấy đáp án từ DuckDuckGo: {ans}", flush=True)
+        print(f"✅ [DDG] Tìm thấy đáp án: {ans}", flush=True)
         return ans
         
     print("⚠️ [DDG] Không tìm thấy, chuyển sang AI fallback...", flush=True)
-    return await ask_free_ai(clean_question)
+    ans_ai = await ask_free_ai(clean_question)
+    if ans_ai:
+        print(f"✅ [AI] Tìm thấy đáp án: {ans_ai}", flush=True)
+        return ans_ai
+        
+    return None
 
 @tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
     if not IS_FEED_ENABLED:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛑 Vòng lặp .feed đang tạm dừng.", flush=True)
         return
 
     if not is_valid_time():
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] ⏳ Ngoài khung giờ hoạt động (8h-22h). Bỏ qua lượt này.", flush=True)
         return
 
     chosen_channel_id = random.choice(FEED_CHANNEL_IDS)
@@ -129,21 +133,15 @@ async def auto_feed_loop(bot_instance):
         try:
             if auto_feed_loop.current_loop > 0:
                 extra_wait = random.randint(60, 300)
-                print(f"--- Đang chờ {extra_wait}s trước khi farm đợt tiếp theo ---", flush=True)
                 await asyncio.sleep(extra_wait)
             
             if not IS_FEED_ENABLED:
                 return
 
             await channel.send(".feed")
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🌾 Đã gửi .feed vào kênh ngẫu nhiên: {chosen_channel_id}", flush=True)
             
-        except discord.errors.HTTPException as e:
-            print(f"🚫 Lỗi Discord: {e}", flush=True)
-        except Exception as e:
-            print(f"❌ Lỗi khi farm: {e}", flush=True)
-    else:
-        print(f"❌ Không tìm thấy hoặc thiếu quyền xem kênh: {chosen_channel_id}", flush=True)
+        except Exception:
+            pass
 
 async def setup_message_listener(bot_instance):
     @bot_instance.event
@@ -153,13 +151,11 @@ async def setup_message_listener(bot_instance):
         if message.content == "!feed off":
             IS_FEED_ENABLED = False
             await message.reply("🛑 Đã tạm dừng vòng lặp tự động gửi `.feed`.")
-            print("⚙️ [HỆ THỐNG] Vòng lặp .feed đã chuyển sang: TẠM DỪNG.", flush=True)
             return
 
         if message.content == "!feed on":
             IS_FEED_ENABLED = True
             await message.reply("🌾 Đã bắt đầu lại vòng lặp tự động gửi `.feed`.")
-            print("⚙️ [HỆ THỐNG] Vòng lặp .feed đã chuyển sang: HOẠT ĐỘNG.", flush=True)
             return
 
         if message.channel.id not in FEED_CHANNEL_IDS:
@@ -174,14 +170,10 @@ async def setup_message_listener(bot_instance):
                 question_text = message.content
 
             if question_text:
-                print(f"🎯 [BOT GAME] Phát hiện câu hỏi tại kênh {message.channel.id}: {question_text}", flush=True)
-                
                 answer = await solve_question(question_text)
-                
                 if answer:
                     await asyncio.sleep(random.uniform(2.0, 4.0))
                     await message.reply(answer)
-                    print(f"✅ [FEED] Đã tự động phản hồi đáp án tìm thấy: {answer}", flush=True)
                 else:
                     print("⚠️ [FEED] Không thể trích xuất được đáp án chính xác.", flush=True)
 
