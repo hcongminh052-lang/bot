@@ -47,9 +47,9 @@ async def ask_gemini_rest(clean_question):
         return None
 
     models_to_try = [
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash",
-        "gemini-2.5-flash"
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-1.5-pro"
     ]
 
     prompt = f"Bạn là hệ thống giải đố game. Trả lời câu hỏi sau bằng tên riêng/đáp án chuẩn xác nhất trong game. Chỉ xuất DUY NHẤT đáp án từ 1 đến 5 từ, không viết thành câu, không giải thích.\n\nCâu hỏi: {clean_question}"
