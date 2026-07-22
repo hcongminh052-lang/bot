@@ -59,22 +59,26 @@ async def fetch_pollinations(prompt, model=None):
     return None
 
 async def ask_ai_solver(clean_question):
-    prompt = f"Câu hỏi: {clean_question}\nYêu cầu: Chỉ trả về ĐÚNG TÊN/ĐÁP ÁN (từ 1 đến 6 từ). KHÔNG TRẢ LỜI THÀNH CÂU. KHÔNG GIẢI THÍCH."
+    prompt = f"Câu hỏi trivia game: {clean_question}\nHãy trả lời đáp án ngắn gọn nhất. Đặt đáp án chính xác duy nhất bên trong thẻ <ans> và </ans>. Ví dụ: <ans>Pour la Justice</ans>"
     
     models = [None, "openai", "mistral"]
     
     for model in models:
         raw_response = await fetch_pollinations(prompt, model)
         if raw_response:
-            raw_response = re.sub(r'\*\*|__|\*|_', '', raw_response)
-            first_line = raw_response.split('\n')[0].strip()
+            match = re.search(r'<ans>(.*?)</ans>', raw_response, re.DOTALL | re.IGNORECASE)
+            if match:
+                ans_text = match.group(1).strip()
+                cleaned = clean_final_answer(ans_text)
+                if cleaned:
+                    return cleaned
             
+            raw_clean = re.sub(r'\*\*|__|\*|_', '', raw_response)
+            first_line = raw_clean.split('\n')[0].strip()
             cleaned = clean_final_answer(first_line)
+            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là|món ăn(?: đặc biệt)?(?: là)?)\s+', '', cleaned, flags=re.IGNORECASE).strip()
             
-            cleaned = re.sub(r'^(đáp án(?: là)?|tên(?: là)?|gọi(?: là)?|chính(?: là)?|là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-            
-            words = cleaned.split()
-            if 1 <= len(words) <= 7:
+            if cleaned and len(cleaned.split()) <= 10:
                 return cleaned
 
     return None
