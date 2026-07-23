@@ -18,39 +18,22 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-GEMINI_API_KEYS = [
-    "AQ.Ab8RN6JQkx441gc__6_N4MSLC1wPM_O44nFxP1JHjwyhK--0Cg",
-    "AQ.Ab8RN6KAGqai-T7w4RbG7qD66Q8aw3Vx5r_9EpCm-iT2cX_HCA",
-    "AQ.Ab8RN6I-7F8O9ISDIkN2BKt9zHZnP_4k3nmzIKu4uXp7mhcx3Q"
-]
+GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip() and k.startswith("AIzaSy")]
 
 GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-1.5-flash"
 ]
 
-GENSHIN_CHAR_ELEMENTS = {
-    "thủy": ["furina", "neuvillette", "yelan", "xingqiu", "barbara", "kokomi", "nilou", "mona", "ayato", "tartaglia", "childe", "candace", "sigewinne", "mualani"],
-    "nham": ["zhongli", "ningguang", "albedo", "itto", "navia", "chiori", "noelle", "yun jin", "gorou", "kachina"],
-    "phong": ["venti", "kazuha", "sucrose", "jean", "xiao", "wanderer", "heizou", "sayu", "xianyun", "faruzan", "lynette"],
-    "lôi": ["raiden", "ei", "shogun", "yae", "fischl", "beidou", "keqing", "cyno", "kuki", "clorinde", "sethos", "dori", "lisa", "razor", "sara", "ororon"],
-    "thảo": ["nahida", "alhaitham", "baizhu", "tighnari", "collei", "yaoyao", "kaveh", "emilie", "kinich", "kirara"],
-    "hỏa": ["hu tao", "diluc", "xiangling", "bennett", "yoimiya", "arlecchino", "gaming", "lyney", "dehya", "mavuika", "klee", "yanfei", "thoma", "amber", "xinyan", "chevreuse"],
-    "băng": ["ganyu", "ayaka", "shenhe", "eula", "wriothesley", "rosaria", "layla", "diona", "charlotte", "citlali", "chongyun", "qiqi", "aloy", "freminet", "mika"]
-}
-
-ELEMENT_NAMES = {
-    "thủy": "Thủy",
-    "nham": "Nham",
-    "phong": "Phong",
-    "lôi": "Lôi",
-    "thảo": "Thảo",
-    "hỏa": "Hỏa",
-    "băng": "Băng"
-}
+ANIME_WIKI_DOMAINS = [
+    "genshin-impact.fandom.com/vi",
+    "genshin-impact.fandom.com",
+    "umamusume.fandom.com",
+    "animanga.fandom.com",
+    "vi.wikipedia.org"
+]
 
 BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia"]
-STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -75,15 +58,6 @@ def extract_real_question(text):
             
     return None
 
-def solve_genshin_local(clean_question):
-    q_lower = clean_question.lower()
-    if "nguyên tố" in q_lower or "thần" in q_lower or "cai quản" in q_lower:
-        for elem_key, char_list in GENSHIN_CHAR_ELEMENTS.items():
-            for char in char_list:
-                if char in q_lower:
-                    return ELEMENT_NAMES[elem_key]
-    return None
-
 def parse_extracted_phrase(raw_found):
     if not raw_found:
         return None
@@ -105,6 +79,48 @@ def parse_extracted_phrase(raw_found):
         
     return None
 
+async def query_fandom_wiki_api(clean_question):
+    keywords = re.sub(r'^(?:cho tôi biết|bạn có biết|hãy cho biết|từng|đã|món ăn đặc biệt của|người dân|là gì)\s+', '', clean_question, flags=re.IGNORECASE)
+    search_q = urllib.parse.quote(keywords.strip())
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+    print("🌐 [ANIME WIKI API] Đang quét hệ thống Fandom/Wiki...", flush=True)
+
+    async with aiohttp.ClientSession() as session:
+        for domain in ANIME_WIKI_DOMAINS:
+            url = f"https://{domain}/api.php?action=query&list=search&srsearch={search_q}&format=json"
+            try:
+                async with session.get(url, headers=headers, timeout=4) as res:
+                    if res.status == 200:
+                        data = await res.json()
+                        search_results = data.get("query", {}).get("search", [])
+                        for item in search_results:
+                            snippet = item.get("snippet", "")
+                            clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+
+                            if "món ăn" in clean_question.lower() or "đặc biệt" in clean_question.lower():
+                                match = re.search(r'(?:món ăn đặc biệt|special dish|signature dish)\s*(?:là|is)?\s*["\'«“]?([^".\n,]+)["\'»”]?', clean_snippet, re.IGNORECASE)
+                                if match:
+                                    ans = parse_extracted_phrase(match.group(1))
+                                    if ans:
+                                        return ans
+
+                            if "học viện" in clean_question.lower() or "trường" in clean_question.lower():
+                                match = re.search(r'(?:học viện|trường|academy|school)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_snippet, re.IGNORECASE)
+                                if match:
+                                    ans = parse_extracted_phrase(match.group(1))
+                                    if ans:
+                                        return ans
+
+                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', clean_snippet)
+                            for qm in quoted_matches:
+                                ans = parse_extracted_phrase(qm)
+                                if ans:
+                                    return ans
+            except Exception:
+                continue
+    return None
+
 async def ask_gemini_api(clean_question):
     if not GEMINI_API_KEYS:
         return None
@@ -114,7 +130,7 @@ async def ask_gemini_api(clean_question):
             {
                 "parts": [
                     {
-                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
+                        "text": f"Đây là câu hỏi đố vui anime/game: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
                     }
                 ]
             }
@@ -125,18 +141,13 @@ async def ask_gemini_api(clean_question):
         }
     }
 
-    for key_index, token in enumerate(GEMINI_API_KEYS, start=1):
-        for model in GEMINI_MODELS:
-            headers = {"Content-Type": "application/json"}
-            
-            if token.startswith("AIzaSy"):
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={token}"
-            else:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                headers["Authorization"] = f"Bearer {token}"
+    headers = {"Content-Type": "application/json"}
 
+    for key_index, api_key in enumerate(GEMINI_API_KEYS, start=1):
+        for model in GEMINI_MODELS:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             try:
-                print(f"🌐 [GEMINI API] Thử Key/Token #{key_index} - Model {model}...", flush=True)
+                print(f"🌐 [GEMINI API] Thử Key #{key_index} - Model {model}...", flush=True)
                 async with aiohttp.ClientSession() as session:
                     async with session.post(url, json=payload, headers=headers, timeout=6) as res:
                         if res.status == 200:
@@ -149,45 +160,17 @@ async def ask_gemini_api(clean_question):
                                     ans = clean_final_answer(raw_text)
                                     if ans:
                                         return ans
-                        else:
-                            print(f"⚠️ [GEMINI API] Token #{key_index} Model {model} trả về lỗi HTTP status: {res.status}", flush=True)
-            except Exception as e:
-                print(f"❌ [GEMINI API ERROR]: {e}", flush=True)
+            except Exception:
+                pass
 
     return None
 
-async def fetch_wikipedia_api(clean_question):
-    keywords = re.sub(r'^(?:cho tôi biết|bạn có biết|hãy cho biết|từng|đã)\s+', '', clean_question, flags=re.IGNORECASE)
-    search_q = urllib.parse.quote(keywords)
-    url = f"https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch={search_q}&format=json"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    
-    try:
-        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia Tiếng Việt...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=4) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    search_results = data.get("query", {}).get("search", [])
-                    for item in search_results:
-                        snippet = item.get("snippet", "")
-                        clean_snippet = re.sub(r'<[^>]+>', '', snippet)
-                        
-                        match = re.search(r'(?:học viện|trường|tại)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', clean_snippet, re.IGNORECASE)
-                        if match:
-                            ans = parse_extracted_phrase(match.group(0))
-                            if ans:
-                                return ans
-    except Exception:
-        pass
-    return None
-
-async def fetch_web_search(clean_question):
+async def fetch_anime_web_search(clean_question):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
     
-    search_q = clean_question
+    search_q = f"{clean_question} wiki fandom"
 
     searx_instances = [
         "https://searx.be/search",
@@ -195,7 +178,7 @@ async def fetch_web_search(clean_question):
         "https://search.mdosch.de/search"
     ]
     
-    print("🌐 [WEB SEARCH] Đang tìm kiếm tổng hợp trên Web...", flush=True)
+    print("🌐 [WEB ANIME SEARCH] Đang truy vấn dữ liệu Web Anime/Wiki...", flush=True)
     async with aiohttp.ClientSession() as session:
         for instance in searx_instances:
             try:
@@ -248,24 +231,19 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_local = solve_genshin_local(clean_question)
-    if ans_local:
-        print(f"✅ [KẾT QUẢ GENSHIN LOCAL]: {ans_local}\n============================================================\n", flush=True)
-        return ans_local
-
     ans_gemini = await ask_gemini_api(clean_question)
     if ans_gemini:
         print(f"✅ [KẾT QUẢ GEMINI AI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
 
-    ans_wiki = await fetch_wikipedia_api(clean_question)
+    ans_wiki = await query_fandom_wiki_api(clean_question)
     if ans_wiki:
-        print(f"✅ [KẾT QUẢ WIKIPEDIA]: {ans_wiki}\n============================================================\n", flush=True)
+        print(f"✅ [KẾT QUẢ ANIME WIKI API]: {ans_wiki}\n============================================================\n", flush=True)
         return ans_wiki
 
-    ans_web = await fetch_web_search(clean_question)
+    ans_web = await fetch_anime_web_search(clean_question)
     if ans_web:
-        print(f"✅ [KẾT QUẢ WEB SEARCH]: {ans_web}\n============================================================\n", flush=True)
+        print(f"✅ [KẾT QUẢ WEB ANIME SEARCH]: {ans_web}\n============================================================\n", flush=True)
         return ans_web
 
     print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
