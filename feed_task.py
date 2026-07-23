@@ -4,10 +4,8 @@ import asyncio
 import random
 import re
 import urllib.parse
-import pytz
 import discord
 from discord.ext import commands, tasks
-from datetime import datetime
 import io
 import aiohttp
 from bs4 import BeautifulSoup
@@ -64,59 +62,84 @@ def parse_extracted_phrase(raw_found):
 
 async def fetch_web_search(clean_question):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
     
-    search_urls = [
-        f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}",
-        f"https://lite.duckduckgo.com/lite/?q={urllib.parse.quote(clean_question)}",
-        f"https://www.google.com/search?q={urllib.parse.quote(clean_question)}&hl=vi"
+    searx_instances = [
+        "https://searx.be/search",
+        "https://searx.tiekoetter.com/search",
+        "https://search.mdosch.de/search",
+        "https://searx.roflcopter.fr/search"
     ]
     
-    try:
-        print("🌐 [WEB SEARCH] Đang tìm kiếm đáp án từ Web...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            for url in search_urls:
-                try:
-                    async with session.get(url, headers=headers, timeout=5) as res:
-                        if res.status == 200:
-                            html_text = await res.text()
-                            soup = BeautifulSoup(html_text, 'html.parser')
+    print("🌐 [WEB SEARCH] Đang tìm kiếm qua SearxNG JSON & DDG POST...", flush=True)
+    async with aiohttp.ClientSession() as session:
+        for instance in searx_instances:
+            try:
+                params = {"q": clean_question, "format": "json"}
+                async with session.get(instance, params=params, headers=headers, timeout=5) as res:
+                    if res.status == 200:
+                        data = await res.json()
+                        results = data.get("results", [])
+                        for result in results:
+                            title_text = result.get("title", "")
+                            snippet_text = result.get("content", "")
                             
-                            titles = []
-                            for h3 in soup.find_all(['h3', 'a']):
-                                t_text = h3.get_text().strip()
-                                if t_text and len(t_text) > 3:
-                                    titles.append(t_text)
+                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
+                            for match in quoted_matches:
+                                ans = parse_extracted_phrase(match)
+                                if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                    return ans
                                     
-                            for title_text in titles:
-                                quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
-                                for match in quoted_matches:
-                                    ans = parse_extracted_phrase(match)
-                                    if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
-                                        return ans
-                                        
-                                if '|' in title_text or '-' in title_text:
-                                    delimiter = '|' if '|' in title_text else '-'
-                                    possible_name = title_text.split(delimiter)[0].strip()
-                                    ans = parse_extracted_phrase(possible_name)
-                                    if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
-                                        return ans
+                            if '|' in title_text or '-' in title_text:
+                                delimiter = '|' if '|' in title_text else '-'
+                                possible_name = title_text.split(delimiter)[0].strip()
+                                ans = parse_extracted_phrase(possible_name)
+                                if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                    return ans
 
-                            snippets = [p.get_text().strip() for p in soup.find_all(['span', 'p', 'div']) if len(p.get_text().strip()) > 10]
-                            for snippet_text in snippets:
-                                match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
-                                if match:
-                                    ans = parse_extracted_phrase(match.group(1))
-                                    if ans:
-                                        return ans
-                except Exception:
-                    continue
-    except Exception as e:
-        print(f"  └─ ❌ [SEARCH EXCEPTION]: {e}", flush=True)
-        
+                            match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
+                            if match:
+                                ans = parse_extracted_phrase(match.group(1))
+                                if ans:
+                                    return ans
+            except Exception:
+                continue
+                
+        try:
+            ddg_url = "https://html.duckduckgo.com/html/"
+            payload = {"q": clean_question, "b": ""}
+            async with session.post(ddg_url, data=payload, headers=headers, timeout=5) as res:
+                if res.status == 200:
+                    html_text = await res.text()
+                    soup = BeautifulSoup(html_text, 'html.parser')
+                    for result in soup.find_all('div', class_='result'):
+                        title_tag = result.find('a', class_='result__title')
+                        snippet_tag = result.find('a', class_='result__snippet')
+                        
+                        title_text = title_tag.get_text().strip() if title_tag else ""
+                        snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
+                        
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
+                        for match in quoted_matches:
+                            ans = parse_extracted_phrase(match)
+                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                return ans
+                                
+                        if '|' in title_text:
+                            possible_name = title_text.split('|')[0].strip()
+                            ans = parse_extracted_phrase(possible_name)
+                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                return ans
+
+                        match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
+                        if match:
+                            ans = parse_extracted_phrase(match.group(1))
+                            if ans:
+                                return ans
+        except Exception:
+            pass
+
     return None
 
 async def solve_question(question_text):
