@@ -20,8 +20,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-GEMINI_KEYS_RAW = os.getenv("GEMINI_API_KEYS", "AIzaSy_KEY1, AIzaSy_KEY2, AIzaSy_KEY3")
-GEMINI_API_KEYS = [k.strip() for k in GEMINI_KEYS_RAW.split(",") if k.strip() and "KEY" not in k]
+GEMINI_KEYS_RAW = os.getenv("GEMINI_API_KEYS", "")
 
 GEMINI_MODELS = [
     "gemini-2.0-flash",
@@ -30,8 +29,6 @@ GEMINI_MODELS = [
 ]
 
 ANSWER_CACHE = {}
-
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom"]
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -116,41 +113,49 @@ async def ask_duckduckgo_web_search(clean_question):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
-    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}"
+    
+    urls = [
+        f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(clean_question)}",
+        f"https://lite.duckduckgo.com/lite/?q={urllib.parse.quote(clean_question)}"
+    ]
     
     try:
-        print("🌐 [DDG WEB] Đang cào dữ liệu Google/DDG Search...", flush=True)
+        print("🌐 [DDG WEB] Đang cào dữ liệu DuckDuckGo Search...", flush=True)
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=6) as res:
-                if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
-                    results = soup.find_all('div', class_='result')
-                    
-                    for result in results:
-                        title_tag = result.find('a', class_='result__title')
-                        snippet_tag = result.find('a', class_='result__snippet')
+            for url in urls:
+                async with session.get(url, headers=headers, timeout=6) as res:
+                    if res.status == 200:
+                        html_text = await res.text()
+                        soup = BeautifulSoup(html_text, 'html.parser')
                         
-                        title_text = title_tag.get_text().strip() if title_tag else ""
-                        snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
-                        
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
-                        for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
-                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom"]:
-                                return ans
-                                
-                        if '|' in title_text:
-                            possible_name = title_text.split('|')[0].strip()
-                            ans = parse_extracted_phrase(possible_name)
-                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom"]:
-                                return ans
+                        results = soup.find_all('div', class_='result')
+                        if not results:
+                            results = soup.find_all('td', class_='result-snippet')
+                            
+                        for result in results:
+                            title_tag = result.find('a', class_='result__title') or result.find('a')
+                            snippet_tag = result.find('a', class_='result__snippet') or result
+                            
+                            title_text = title_tag.get_text().strip() if title_tag else ""
+                            snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
+                            
+                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
+                            for match in quoted_matches:
+                                ans = parse_extracted_phrase(match)
+                                if ans and ans.lower() not in ["genshin impact", "furina", "fandom"]:
+                                    return ans
+                                    
+                            if '|' in title_text:
+                                possible_name = title_text.split('|')[0].strip()
+                                ans = parse_extracted_phrase(possible_name)
+                                if ans and ans.lower() not in ["genshin impact", "furina", "fandom"]:
+                                    return ans
 
-                        match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
-                        if match:
-                            ans = parse_extracted_phrase(match.group(1))
-                            if ans:
-                                return ans
+                            match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
+                            if match:
+                                ans = parse_extracted_phrase(match.group(1))
+                                if ans:
+                                    return ans
     except Exception as e:
         print(f"  └─ ❌ [DDG WEB EXCEPTION]: {e}", flush=True)
         
