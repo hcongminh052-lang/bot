@@ -29,51 +29,6 @@ FALLBACK_GEMINI_MODELS = [
     "models/gemini-1.5-pro"
 ]
 
-GENSHIN_CHAR_ELEMENTS = {
-    "thủy": ["furina", "neuvillette", "yelan", "xingqiu", "barbara", "kokomi", "nilou", "mona", "ayato", "tartaglia", "childe", "candace", "sigewinne", "mualani"],
-    "nham": ["zhongli", "ningguang", "albedo", "itto", "navia", "chiori", "noelle", "yun jin", "gorou", "kachina"],
-    "phong": ["venti", "kazuha", "sucrose", "jean", "xiao", "wanderer", "heizou", "sayu", "xianyun", "faruzan", "lynette"],
-    "lôi": ["raiden", "ei", "shogun", "yae", "fischl", "beidou", "keqing", "cyno", "kuki", "clorinde", "sethos", "dori", "lisa", "razor", "sara", "ororon"],
-    "thảo": ["nahida", "alhaitham", "baizhu", "tighnari", "collei", "yaoyao", "kaveh", "emilie", "kinich", "kirara"],
-    "hỏa": ["hu tao", "diluc", "xiangling", "bennett", "yoimiya", "arlecchino", "gaming", "lyney", "dehya", "mavuika", "klee", "yanfei", "thoma", "amber", "xinyan", "chevreuse"],
-    "băng": ["ganyu", "ayaka", "shenhe", "eula", "wriothesley", "rosaria", "layla", "diona", "charlotte", "citlali", "chongyun", "qiqi", "aloy", "freminet", "mika"]
-}
-
-GENSHIN_SPECIAL_DISHES = {
-    "furina": "Pour la Justice",
-    "neuvillette": "Súp Thanh Khiết",
-    "hu tao": "Hồn Ma Diễu Hành",
-    "zhongli": "Súp Măng Chưng",
-    "nahida": "Ma Lực Bật Mầm",
-    "venti": "Nỗi Phiền Muộn Của An Phong",
-    "raiden": "Không thể nấu ăn",
-    "navia": "Nhặt Chọn Mới Về",
-    "arlecchino": "Màn Đêm Phai Mờ",
-    "clorinde": "Nến Đêm Tĩnh Lặng",
-    "chiori": "Thời Trang Tươi Mới",
-    "xiao": "Mộng Đẹp",
-    "kazuha": "Món Ăn Bảy Báu",
-    "alhaitham": "Mục Tiêu Lí Tưởng",
-    "wanderer": "Shimi Chazuke",
-    "lyney": "Trò Khéo Bật Ra",
-    "lynette": "Bánh Kếp Nhỏ",
-    "freminet": "Khung Cảnh Vắng Lòng",
-    "wriothesley": "Sườn Nướng Bí Truyền",
-    "gaming": "Yum Cha",
-    "xianyun": "Bánh Trôi Nước",
-    "sigewinne": "Tuyệt Tác Thực Phẩm"
-}
-
-ELEMENT_NAMES = {
-    "thủy": "Thủy",
-    "nham": "Nham",
-    "phong": "Phong",
-    "lôi": "Lôi",
-    "thảo": "Thảo",
-    "hỏa": "Hỏa",
-    "băng": "Băng"
-}
-
 BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia", "big three", "heisei"]
 
 def clean_final_answer(text):
@@ -97,25 +52,6 @@ def extract_real_question(text):
             clean_line = re.sub(r'\*\*|__|[*_`]', '', line)
             return clean_line.strip()
             
-    return None
-
-def solve_anime_game_local(clean_question):
-    q_lower = clean_question.lower()
-    
-    if "oguri cap" in q_lower and ("học viện" in q_lower or "trường" in q_lower or "tracen" in q_lower):
-        return "Kasamatsu"
-
-    if "món ăn" in q_lower or "đặc biệt" in q_lower:
-        for char_name, dish_name in GENSHIN_SPECIAL_DISHES.items():
-            if char_name in q_lower:
-                return dish_name
-
-    if "nguyên tố" in q_lower or "thần" in q_lower or "cai quản" in q_lower:
-        for elem_key, char_list in GENSHIN_CHAR_ELEMENTS.items():
-            for char in char_list:
-                if char in q_lower:
-                    return ELEMENT_NAMES[elem_key]
-                    
     return None
 
 def parse_extracted_phrase(raw_found):
@@ -168,7 +104,7 @@ async def ask_gemini_api(clean_question):
             {
                 "parts": [
                     {
-                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
+                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy suy luận chính xác và trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
                     }
                 ]
             }
@@ -298,11 +234,6 @@ async def solve_question(question_text):
         
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
-
-    ans_local = solve_anime_game_local(clean_question)
-    if ans_local:
-        print(f"✅ [KẾT QUẢ LOCAL SOLVER]: {ans_local}\n============================================================\n", flush=True)
-        return ans_local
 
     ans_gemini = await ask_gemini_api(clean_question)
     if ans_gemini:
