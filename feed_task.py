@@ -12,7 +12,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-@tasks.loop(hours=4, minutes=5)
+@tasks.loop(hours=4, minutes=30)
 async def auto_feed_loop(bot_instance):
     if not IS_FEED_ENABLED:
         return
@@ -44,8 +44,8 @@ async def auto_feed_loop(bot_instance):
             pass
 
 async def setup_message_listener(bot_instance):
-    @bot_instance.event
-    async def on_message(message):
+    @bot_instance.listen('on_message')
+    async def handle_feed_commands(message):
         global IS_FEED_ENABLED
 
         if message.content == "!feed off":
