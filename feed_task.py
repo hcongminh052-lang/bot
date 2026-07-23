@@ -18,14 +18,32 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom", "wikipedia"]
+GENSHIN_ELEMENTS = {
+    "thủy": "Thủy",
+    "hydro": "Thủy",
+    "hỏa": "Hỏa",
+    "pyro": "Hỏa",
+    "lôi": "Lôi",
+    "electro": "Lôi",
+    "thảo": "Thảo",
+    "dendro": "Thảo",
+    "băng": "Băng",
+    "cryo": "Băng",
+    "phong": "Phong",
+    "anemo": "Phong",
+    "nham": "Nham",
+    "geo": "Nham"
+}
+
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom", "wikipedia", "lịch sử"]
 STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    text = re.sub(r'\([^)]*\)', '', text)
-    text = re.sub(r'\[[^\]]*\]', '', text)
-    text = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s\-_,]', '', text)
+    text = re.sub(r'\([^)]*\)', ' ', text)
+    text = re.sub(r'\[[^\]]*\]', ' ', text)
+    text = re.sub(r'[/_\\\-]', ' ', text)
+    text = re.sub(r'[^a-zA-Z0-9ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐÊÔƠƯưăâđêôơư\s]', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
@@ -43,7 +61,7 @@ def extract_real_question(text):
             
     return None
 
-def parse_extracted_phrase(raw_found):
+def parse_extracted_phrase(raw_found, question_type=None):
     if not raw_found:
         return None
         
@@ -60,6 +78,9 @@ def parse_extracted_phrase(raw_found):
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
+    if question_type == "element" and cleaned.lower() in ["fontaine", "furina", "mondstadt", "liyue", "inazuma", "sumeru", "natlan", "snezhnaya"]:
+        return None
+
     if 1 <= len(words) <= 5 and len(cleaned) >= 2:
         return cleaned
     elif len(words) > 5:
@@ -67,88 +88,15 @@ def parse_extracted_phrase(raw_found):
         
     return None
 
-async def fetch_wikipedia_api(clean_question):
-    url = f"https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(clean_question)}&format=json"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        print("🌐 [WIKIPEDIA API] Đang tìm kiếm trên Wikipedia Tiếng Việt...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=4) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    search_results = data.get("query", {}).get("search", [])
-                    for item in search_results:
-                        title = item.get("title", "")
-                        snippet = item.get("snippet", "")
-                        clean_snippet = re.sub(r'<[^>]+>', '', snippet)
-                        
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', clean_snippet)
-                        for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
-                            if ans:
-                                return ans
-                                
-                        ans = parse_extracted_phrase(title)
-                        if ans:
-                            return ans
-    except Exception:
-        pass
+def detect_element_in_text(text):
+    text_lower = text.lower()
+    for key, val in GENSHIN_ELEMENTS.items():
+        pattern = r'\b' + re.escape(key) + r'\b'
+        if re.search(pattern, text_lower):
+            return val
     return None
 
-async def fetch_anilist_api(clean_question):
-    url = "https://graphql.anilist.co"
-    query = '''
-    query ($search: String) {
-      Media (search: $search, type: ANIME) {
-        title {
-          romaji
-          english
-          native
-        }
-        source
-      }
-    }
-    '''
-    variables = {"search": clean_question}
-    try:
-        print("🌐 [ANILIST API] Đang tra cứu cơ sở dữ liệu AniList...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={'query': query, 'variables': variables}, timeout=4) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    media = data.get("data", {}).get("Media", {})
-                    if media:
-                        titles = media.get("title", {})
-                        for t_key in ["native", "romaji", "english"]:
-                            t_val = titles.get(t_key)
-                            if t_val:
-                                ans = parse_extracted_phrase(t_val)
-                                if ans:
-                                    return ans
-    except Exception:
-        pass
-    return None
-
-async def fetch_jikan_api(clean_question):
-    url = f"https://api.jikan.moe/v4/anime?q={urllib.parse.quote(clean_question)}&limit=3"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        print("🌐 [JIKAN API] Đang tra cứu MyAnimeList (Jikan API)...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=4) as res:
-                if res.status == 200:
-                    data = await res.json()
-                    results = data.get("data", [])
-                    for item in results:
-                        title = item.get("title_japanese") or item.get("title")
-                        ans = parse_extracted_phrase(title)
-                        if ans:
-                            return ans
-    except Exception:
-        pass
-    return None
-
-async def fetch_fandom_api(clean_question):
+async def fetch_fandom_api(clean_question, is_element_query):
     url = f"https://genshin-impact.fandom.com/vi/api.php?action=query&list=search&srsearch={urllib.parse.quote(clean_question)}&format=json"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
@@ -159,20 +107,28 @@ async def fetch_fandom_api(clean_question):
                     data = await res.json()
                     search_results = data.get("query", {}).get("search", [])
                     for item in search_results:
+                        snippet = item.get("snippet", "")
+                        clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+                        
+                        if is_element_query:
+                            found_elem = detect_element_in_text(clean_snippet)
+                            if found_elem:
+                                return found_elem
+
                         title = item.get("title", "")
                         quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title)
                         if quoted_matches:
-                            ans = parse_extracted_phrase(quoted_matches[0])
+                            ans = parse_extracted_phrase(quoted_matches[0], "element" if is_element_query else None)
                             if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                                 return ans
-                        ans = parse_extracted_phrase(title)
+                        ans = parse_extracted_phrase(title, "element" if is_element_query else None)
                         if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                             return ans
     except Exception:
         pass
     return None
 
-async def fetch_web_search(clean_question):
+async def fetch_web_search(clean_question, is_element_query):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
@@ -193,25 +149,30 @@ async def fetch_web_search(clean_question):
                         data = await res.json()
                         results = data.get("results", [])
                         for result in results:
-                            title_text = result.get("title", "")
                             snippet_text = result.get("content", "")
                             
+                            if is_element_query:
+                                found_elem = detect_element_in_text(snippet_text)
+                                if found_elem:
+                                    return found_elem
+
+                            title_text = result.get("title", "")
                             quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
                             for match in quoted_matches:
-                                ans = parse_extracted_phrase(match)
+                                ans = parse_extracted_phrase(match, "element" if is_element_query else None)
                                 if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                                     return ans
                                     
                             if '|' in title_text or '-' in title_text:
                                 delimiter = '|' if '|' in title_text else '-'
                                 possible_name = title_text.split(delimiter)[0].strip()
-                                ans = parse_extracted_phrase(possible_name)
+                                ans = parse_extracted_phrase(possible_name, "element" if is_element_query else None)
                                 if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                                     return ans
 
                             match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
                             if match:
-                                ans = parse_extracted_phrase(match.group(1))
+                                ans = parse_extracted_phrase(match.group(1), "element" if is_element_query else None)
                                 if ans:
                                     return ans
             except Exception:
@@ -225,27 +186,32 @@ async def fetch_web_search(clean_question):
                     html_text = await res.text()
                     soup = BeautifulSoup(html_text, 'html.parser')
                     for result in soup.find_all('div', class_='result'):
-                        title_tag = result.find('a', class_='result__title')
                         snippet_tag = result.find('a', class_='result__snippet')
-                        
-                        title_text = title_tag.get_text().strip() if title_tag else ""
                         snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
+                        
+                        if is_element_query:
+                            found_elem = detect_element_in_text(snippet_text)
+                            if found_elem:
+                                return found_elem
+
+                        title_tag = result.find('a', class_='result__title')
+                        title_text = title_tag.get_text().strip() if title_tag else ""
                         
                         quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
                         for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
+                            ans = parse_extracted_phrase(match, "element" if is_element_query else None)
                             if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                                 return ans
                                 
                         if '|' in title_text:
                             possible_name = title_text.split('|')[0].strip()
-                            ans = parse_extracted_phrase(possible_name)
+                            ans = parse_extracted_phrase(possible_name, "element" if is_element_query else None)
                             if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
                                 return ans
 
                         match = re.search(r'(?:là|có tên là|tên là)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s\-_]{2,25})', snippet_text, re.IGNORECASE)
                         if match:
-                            ans = parse_extracted_phrase(match.group(1))
+                            ans = parse_extracted_phrase(match.group(1), "element" if is_element_query else None)
                             if ans:
                                 return ans
         except Exception:
@@ -261,27 +227,14 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_wiki = await fetch_wikipedia_api(clean_question)
-    if ans_wiki:
-        print(f"✅ [KẾT QUẢ WIKIPEDIA]: {ans_wiki}\n============================================================\n", flush=True)
-        return ans_wiki
+    is_element_query = "nguyên tố" in clean_question.lower()
 
-    ans_anilist = await fetch_anilist_api(clean_question)
-    if ans_anilist:
-        print(f"✅ [KẾT QUẢ ANILIST]: {ans_anilist}\n============================================================\n", flush=True)
-        return ans_anilist
-
-    ans_jikan = await fetch_jikan_api(clean_question)
-    if ans_jikan:
-        print(f"✅ [KẾT QUẢ JIKAN/MAL]: {ans_jikan}\n============================================================\n", flush=True)
-        return ans_jikan
-
-    ans_fandom = await fetch_fandom_api(clean_question)
+    ans_fandom = await fetch_fandom_api(clean_question, is_element_query)
     if ans_fandom:
         print(f"✅ [KẾT QUẢ FANDOM]: {ans_fandom}\n============================================================\n", flush=True)
         return ans_fandom
 
-    ans_web = await fetch_web_search(clean_question)
+    ans_web = await fetch_web_search(clean_question, is_element_query)
     if ans_web:
         print(f"✅ [KẾT QUẢ WEB SEARCH]: {ans_web}\n============================================================\n", flush=True)
         return ans_web
