@@ -25,15 +25,7 @@ GEMINI_MODELS = [
     "gemini-1.5-flash"
 ]
 
-ANIME_WIKI_DOMAINS = [
-    "genshin-impact.fandom.com/vi",
-    "genshin-impact.fandom.com",
-    "umamusume.fandom.com",
-    "animanga.fandom.com",
-    "vi.wikipedia.org"
-]
-
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia"]
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia", "genshin impact", "umamusume"]
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -63,7 +55,7 @@ def parse_extracted_phrase(raw_found):
         return None
         
     cleaned = clean_final_answer(raw_found)
-    cleaned = re.sub(r'^(?:món|món ăn|là|của|tên là|có tên là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'^(?:món|món ăn|món ăn đặc biệt|là|của|tên là|có tên là|đặc biệt)\s+', '', cleaned, flags=re.IGNORECASE).strip()
     
     words = cleaned.split()
     if not words:
@@ -72,53 +64,79 @@ def parse_extracted_phrase(raw_found):
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
-    if 1 <= len(words) <= 6 and len(cleaned) >= 2:
+    if 1 <= len(words) <= 5 and len(cleaned) >= 2:
         return cleaned
-    elif len(words) > 6:
-        return " ".join(words[:4])
+    elif len(words) > 5:
+        return " ".join(words[:3])
         
     return None
 
-async def query_fandom_wiki_api(clean_question):
-    keywords = re.sub(r'^(?:cho tôi biết|bạn có biết|hãy cho biết|từng|đã|món ăn đặc biệt của|người dân|là gì)\s+', '', clean_question, flags=re.IGNORECASE)
-    search_q = urllib.parse.quote(keywords.strip())
+async def query_fandom_infobox_api(clean_question):
+    char_match = re.search(r'(?:của|nhân vật)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_question, re.IGNORECASE)
+    search_target = char_match.group(1).strip() if char_match else clean_question
+    
+    encoded_target = urllib.parse.quote(search_target)
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    print("🌐 [ANIME WIKI API] Đang quét hệ thống Fandom/Wiki...", flush=True)
+    fandom_endpoints = [
+        f"https://genshin-impact.fandom.com/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json",
+        f"https://genshin-impact.fandom.com/vi/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json",
+        f"https://umamusume.fandom.com/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json"
+    ]
+
+    print(f"🌐 [ANIME WIKI API] Đang quét trực tiếp Infobox Fandom cho: {search_target}...", flush=True)
 
     async with aiohttp.ClientSession() as session:
-        for domain in ANIME_WIKI_DOMAINS:
-            url = f"https://{domain}/api.php?action=query&list=search&srsearch={search_q}&format=json"
+        for url in fandom_endpoints:
             try:
                 async with session.get(url, headers=headers, timeout=4) as res:
                     if res.status == 200:
                         data = await res.json()
-                        search_results = data.get("query", {}).get("search", [])
-                        for item in search_results:
-                            snippet = item.get("snippet", "")
-                            clean_snippet = re.sub(r'<[^>]+>', '', snippet)
-
-                            if "món ăn" in clean_question.lower() or "đặc biệt" in clean_question.lower():
-                                match = re.search(r'(?:món ăn đặc biệt|special dish|signature dish)\s*(?:là|is)?\s*["\'«“]?([^".\n,]+)["\'»”]?', clean_snippet, re.IGNORECASE)
-                                if match:
-                                    ans = parse_extracted_phrase(match.group(1))
-                                    if ans:
-                                        return ans
-
-                            if "học viện" in clean_question.lower() or "trường" in clean_question.lower():
-                                match = re.search(r'(?:học viện|trường|academy|school)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_snippet, re.IGNORECASE)
-                                if match:
-                                    ans = parse_extracted_phrase(match.group(1))
-                                    if ans:
-                                        return ans
-
-                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', clean_snippet)
-                            for qm in quoted_matches:
-                                ans = parse_extracted_phrase(qm)
+                        wikitext = data.get("parse", {}).get("wikitext", {}).get("*", "")
+                        if wikitext:
+                            dish_match = re.search(r'dish\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE) or re.search(r'món ăn\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
+                            if dish_match:
+                                ans = parse_extracted_phrase(dish_match.group(1))
                                 if ans:
                                     return ans
             except Exception:
                 continue
+    return None
+
+async def fetch_anime_web_search(clean_question):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    }
+    
+    search_q = f"{clean_question} wiki"
+
+    print("🌐 [WEB ANIME SEARCH] Đang quét và phân tích dữ liệu Web...", flush=True)
+    async with aiohttp.ClientSession() as session:
+        try:
+            ddg_url = "https://html.duckduckgo.com/html/"
+            payload = {"q": search_q, "b": ""}
+            async with session.post(ddg_url, data=payload, headers=headers, timeout=5) as res:
+                if res.status == 200:
+                    html_text = await res.text()
+                    soup = BeautifulSoup(html_text, 'html.parser')
+                    for result in soup.find_all('div', class_='result'):
+                        snippet_tag = result.find('a', class_='result__snippet')
+                        snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
+
+                        match_pattern = re.search(r'(?:món ăn đặc biệt|special dish|là)\s*[:\s]*([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', snippet_text, re.IGNORECASE)
+                        if match_pattern:
+                            ans = parse_extracted_phrase(match_pattern.group(1))
+                            if ans:
+                                return ans
+
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', snippet_text)
+                        for match in quoted_matches:
+                            ans = parse_extracted_phrase(match)
+                            if ans:
+                                return ans
+        except Exception:
+            pass
+
     return None
 
 async def ask_gemini_api(clean_question):
@@ -165,64 +183,6 @@ async def ask_gemini_api(clean_question):
 
     return None
 
-async def fetch_anime_web_search(clean_question):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    }
-    
-    search_q = f"{clean_question} wiki fandom"
-
-    searx_instances = [
-        "https://searx.be/search",
-        "https://searx.tiekoetter.com/search",
-        "https://search.mdosch.de/search"
-    ]
-    
-    print("🌐 [WEB ANIME SEARCH] Đang truy vấn dữ liệu Web Anime/Wiki...", flush=True)
-    async with aiohttp.ClientSession() as session:
-        for instance in searx_instances:
-            try:
-                params = {"q": search_q, "format": "json"}
-                async with session.get(instance, params=params, headers=headers, timeout=5) as res:
-                    if res.status == 200:
-                        data = await res.json()
-                        results = data.get("results", [])
-                        for result in results:
-                            snippet_text = result.get("content", "")
-                            title_text = result.get("title", "")
-
-                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
-                            for match in quoted_matches:
-                                ans = parse_extracted_phrase(match)
-                                if ans:
-                                    return ans
-            except Exception:
-                continue
-                
-        try:
-            ddg_url = "https://html.duckduckgo.com/html/"
-            payload = {"q": search_q, "b": ""}
-            async with session.post(ddg_url, data=payload, headers=headers, timeout=5) as res:
-                if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
-                    for result in soup.find_all('div', class_='result'):
-                        snippet_tag = result.find('a', class_='result__snippet')
-                        snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
-                        
-                        title_tag = result.find('a', class_='result__title')
-                        title_text = title_tag.get_text().strip() if title_tag else ""
-                        
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
-                        for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
-                            if ans:
-                                return ans
-        except Exception:
-            pass
-
-    return None
-
 async def solve_question(question_text):
     clean_question = extract_real_question(question_text)
     if not clean_question:
@@ -236,7 +196,7 @@ async def solve_question(question_text):
         print(f"✅ [KẾT QUẢ GEMINI AI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
 
-    ans_wiki = await query_fandom_wiki_api(clean_question)
+    ans_wiki = await query_fandom_infobox_api(clean_question)
     if ans_wiki:
         print(f"✅ [KẾT QUẢ ANIME WIKI API]: {ans_wiki}\n============================================================\n", flush=True)
         return ans_wiki
