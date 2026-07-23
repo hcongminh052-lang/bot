@@ -19,11 +19,11 @@ FEED_CHANNEL_IDS = [
 IS_FEED_ENABLED = True
 
 GEMINI_KEYS_RAW = os.getenv("GEMINI_API_KEYS", "AIzaSy_KEY1, AIzaSy_KEY2")
-GEMINI_API_KEYS = [k.strip() for k in GEMINI_KEYS_RAW.split(",") if k.strip() and "AIzaSy" in k]
+GEMINI_API_KEYS = [k.strip() for k in GEMINI_KEYS_RAW.split(",") if k.strip() and "AIzaSy" in k and "KEY1" not in k and "KEY2" not in k]
 
 GEMINI_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
+    "gemini-1.5-flash",
+    "gemini-2.0-flash"
 ]
 
 GENSHIN_CHAR_ELEMENTS = {
@@ -46,7 +46,7 @@ ELEMENT_NAMES = {
     "băng": "Băng"
 }
 
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia"]
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia", "big three", "heisei"]
 STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
@@ -72,16 +72,21 @@ def extract_real_question(text):
             
     return None
 
-def solve_genshin_local(clean_question):
+def solve_anime_game_local(clean_question):
     q_lower = clean_question.lower()
+    
+    if "oguri cap" in q_lower and ("học viện" in q_lower or "trường" in q_lower or "tracen" in q_lower):
+        return "Kasamatsu"
+
     if "nguyên tố" in q_lower or "thần" in q_lower or "cai quản" in q_lower:
         for elem_key, char_list in GENSHIN_CHAR_ELEMENTS.items():
             for char in char_list:
                 if char in q_lower:
                     return ELEMENT_NAMES[elem_key]
+                    
     return None
 
-def parse_extracted_phrase(raw_found):
+def parse_extracted_phrase(raw_found, question_type=None):
     if not raw_found:
         return None
         
@@ -95,16 +100,19 @@ def parse_extracted_phrase(raw_found):
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
-    if 1 <= len(words) <= 6 and len(cleaned) >= 2:
+    if question_type == "school" and "học viện" not in cleaned.lower() and "trường" in cleaned.lower():
+        pass
+
+    if 1 <= len(words) <= 5 and len(cleaned) >= 2:
         return cleaned
-    elif len(words) > 6:
-        return " ".join(words[:4])
+    elif len(words) > 5:
+        return " ".join(words[:3])
         
     return None
 
 async def ask_gemini_api(clean_question):
     if not GEMINI_API_KEYS:
-        print("⚠️ [GEMINI API] Không tìm thấy API Key hợp lệ trong GEMINI_API_KEYS.", flush=True)
+        print("⚠️ [GEMINI API] Không có GEMINI_API_KEYS hợp lệ (Cần thiết lập API Key thật).", flush=True)
         return None
 
     payload = {
@@ -112,7 +120,7 @@ async def ask_gemini_api(clean_question):
             {
                 "parts": [
                     {
-                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa, câu dẫn, hay dấu chấm câu nào."
+                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 3 từ). Không viết thêm bất kỳ từ thừa nào."
                     }
                 ]
             }
@@ -143,7 +151,8 @@ async def ask_gemini_api(clean_question):
                                     if ans:
                                         return ans
                         else:
-                            print(f"⚠️ [GEMINI API] Key #{key_index} Model {model} trả về lỗi HTTP status: {res.status}", flush=True)
+                            err_body = await res.text()
+                            print(f"⚠️ [GEMINI API] Lỗi HTTP {res.status}: {err_body[:100]}", flush=True)
             except Exception as e:
                 print(f"❌ [GEMINI API ERROR]: {e}", flush=True)
 
@@ -156,7 +165,7 @@ async def fetch_wikipedia_api(clean_question):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     
     try:
-        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia Tiếng Việt...", flush=True)
+        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia...", flush=True)
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=4) as res:
                 if res.status == 200:
@@ -166,7 +175,7 @@ async def fetch_wikipedia_api(clean_question):
                         snippet = item.get("snippet", "")
                         clean_snippet = re.sub(r'<[^>]+>', '', snippet)
                         
-                        match = re.search(r'(?:học viện|trường|tại)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', clean_snippet, re.IGNORECASE)
+                        match = re.search(r'(?:học viện|trường)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_snippet, re.IGNORECASE)
                         if match:
                             ans = parse_extracted_phrase(match.group(0))
                             if ans:
@@ -180,6 +189,7 @@ async def fetch_web_search(clean_question):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
     
+    is_school_query = "học viện" in clean_question.lower() or "trường" in clean_question.lower()
     search_q = clean_question
 
     searx_instances = [
@@ -199,9 +209,16 @@ async def fetch_web_search(clean_question):
                         results = data.get("results", [])
                         for result in results:
                             snippet_text = result.get("content", "")
-                            title_text = result.get("title", "")
+                            
+                            if is_school_query:
+                                match = re.search(r'(?:học viện|trường)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', snippet_text, re.IGNORECASE)
+                                if match:
+                                    ans = parse_extracted_phrase(match.group(1))
+                                    if ans:
+                                        return ans
 
-                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
+                            title_text = result.get("title", "")
+                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
                             for match in quoted_matches:
                                 ans = parse_extracted_phrase(match)
                                 if ans:
@@ -220,14 +237,12 @@ async def fetch_web_search(clean_question):
                         snippet_tag = result.find('a', class_='result__snippet')
                         snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
                         
-                        title_tag = result.find('a', class_='result__title')
-                        title_text = title_tag.get_text().strip() if title_tag else ""
-                        
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
-                        for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
-                            if ans:
-                                return ans
+                        if is_school_query:
+                            match = re.search(r'(?:học viện|trường)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', snippet_text, re.IGNORECASE)
+                            if match:
+                                ans = parse_extracted_phrase(match.group(1))
+                                if ans:
+                                    return ans
         except Exception:
             pass
 
@@ -241,9 +256,9 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_local = solve_genshin_local(clean_question)
+    ans_local = solve_anime_game_local(clean_question)
     if ans_local:
-        print(f"✅ [KẾT QUẢ GENSHIN LOCAL]: {ans_local}\n============================================================\n", flush=True)
+        print(f"✅ [KẾT QUẢ LOCAL SOLVER]: {ans_local}\n============================================================\n", flush=True)
         return ans_local
 
     ans_gemini = await ask_gemini_api(clean_question)
