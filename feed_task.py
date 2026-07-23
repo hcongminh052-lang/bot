@@ -1,239 +1,27 @@
-import json
-import os
 import asyncio
 import random
-import re
-import urllib.parse
+from datetime import datetime, timezone, timedelta
 import discord
-from discord.ext import commands, tasks
-import io
-import aiohttp
-from bs4 import BeautifulSoup
-
-BOT_GAME_ID = 1228264831870701648
+from discord.ext import tasks
 
 FEED_CHANNEL_IDS = [
+    1381241446409175040,
+    1214564134356779118,
     1292304060342603840
 ]
 
 IS_FEED_ENABLED = True
 
-GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip() and k.startswith("AIzaSy")]
-
-GEMINI_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash"
-]
-
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia", "genshin impact", "umamusume"]
-
-def clean_final_answer(text):
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    text = re.sub(r'\([^)]*\)', ' ', text)
-    text = re.sub(r'\[[^\]]*\]', ' ', text)
-    text = re.sub(r'[/_\\\-]', ' ', text)
-    text = re.sub(r'[^\w\sàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệiíìỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđĐ]', '', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def extract_real_question(text):
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-    for line in lines:
-        if '?' in line and not line.startswith('💬') and not line.startswith('↩️'):
-            clean_line = re.sub(r'\*\*|__|[*_`]', '', line)
-            return clean_line.strip()
-            
-    for line in lines:
-        if not line.startswith('💬') and not line.startswith('↩️') and "Reply" not in line:
-            clean_line = re.sub(r'\*\*|__|[*_`]', '', line)
-            return clean_line.strip()
-            
-    return None
-
-def extract_subject_name(question_text):
-    text = re.sub(r'(?:có tên là gì|là gì|là ai|như thế nào|ở đâu|nào|\?).*$', '', question_text, flags=re.IGNORECASE).strip()
-    match = re.search(r'(?:của|nhân vật)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,15})', text, re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    return text
-
-def parse_extracted_phrase(raw_found):
-    if not raw_found:
-        return None
-        
-    cleaned = clean_final_answer(raw_found)
-    cleaned = re.sub(r'^(?:món|món ăn|món ăn đặc biệt|là|của|tên là|có tên là|đặc biệt)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-    
-    words = cleaned.split()
-    if not words:
-        return None
-        
-    if any(bad in cleaned.lower() for bad in BAD_WORDS):
-        return None
-
-    if 1 <= len(words) <= 5 and len(cleaned) >= 2:
-        return cleaned
-    elif len(words) > 5:
-        return " ".join(words[:3])
-        
-    return None
-
-async def query_fandom_infobox_api(clean_question):
-    subject = extract_subject_name(clean_question)
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-    print(f"🌐 [ANIME WIKI API] Đang quét trực tiếp Infobox Fandom cho: {subject}...", flush=True)
-
-    fandom_sites = [
-        "https://genshin-impact.fandom.com",
-        "https://genshin-impact.fandom.com/vi",
-        "https://umamusume.fandom.com"
-    ]
-
-    async with aiohttp.ClientSession() as session:
-        for site in fandom_sites:
-            try:
-                search_url = f"{site}/api.php?action=query&list=search&srsearch={urllib.parse.quote(subject)}&format=json"
-                async with session.get(search_url, headers=headers, timeout=4) as res:
-                    if res.status != 200:
-                        continue
-                    data = await res.json()
-                    results = data.get("query", {}).get("search", [])
-                    if not results:
-                        continue
-                    
-                    page_title = results[0]["title"]
-                    parse_url = f"{site}/api.php?action=parse&page={urllib.parse.quote(page_title)}&prop=wikitext&format=json"
-                    
-                    async with session.get(parse_url, headers=headers, timeout=4) as parse_res:
-                        if parse_res.status == 200:
-                            pdata = await parse_res.json()
-                            wikitext = pdata.get("parse", {}).get("wikitext", {}).get("*", "")
-                            if wikitext:
-                                dish_match = re.search(r'(?:dish|special_dish|món ăn)\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
-                                if dish_match:
-                                    ans = parse_extracted_phrase(dish_match.group(1))
-                                    if ans:
-                                        return ans
-                                        
-                                school_match = re.search(r'(?:school|academy|trường|học viện)\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
-                                if school_match:
-                                    ans = parse_extracted_phrase(school_match.group(1))
-                                    if ans:
-                                        return ans
-            except Exception:
-                continue
-    return None
-
-async def fetch_anime_web_search(clean_question):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    }
-    
-    search_q = f"{clean_question} wiki"
-
-    print("🌐 [WEB ANIME SEARCH] Đang quét và phân tích dữ liệu Web...", flush=True)
-    async with aiohttp.ClientSession() as session:
-        try:
-            ddg_url = "https://html.duckduckgo.com/html/"
-            payload = {"q": search_q, "b": ""}
-            async with session.post(ddg_url, data=payload, headers=headers, timeout=5) as res:
-                if res.status == 200:
-                    html_text = await res.text()
-                    soup = BeautifulSoup(html_text, 'html.parser')
-                    for result in soup.find_all('div', class_='result'):
-                        snippet_tag = result.find('a', class_='result__snippet')
-                        snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
-
-                        match_pattern = re.search(r'(?:món ăn đặc biệt|special dish|là|tên là)\s*[:\s]*([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', snippet_text, re.IGNORECASE)
-                        if match_pattern:
-                            ans = parse_extracted_phrase(match_pattern.group(1))
-                            if ans:
-                                return ans
-
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', snippet_text)
-                        for match in quoted_matches:
-                            ans = parse_extracted_phrase(match)
-                            if ans:
-                                return ans
-        except Exception:
-            pass
-
-    return None
-
-async def ask_gemini_api(clean_question):
-    if not GEMINI_API_KEYS:
-        return None
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": f"Đây là câu hỏi đố vui anime/game: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 30
-        }
-    }
-
-    headers = {"Content-Type": "application/json"}
-
-    for key_index, api_key in enumerate(GEMINI_API_KEYS, start=1):
-        for model in GEMINI_MODELS:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            try:
-                print(f"🌐 [GEMINI API] Thử Key #{key_index} - Model {model}...", flush=True)
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers, timeout=6) as res:
-                        if res.status == 200:
-                            data = await res.json()
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    raw_text = parts[0].get("text", "").strip()
-                                    ans = clean_final_answer(raw_text)
-                                    if ans:
-                                        return ans
-            except Exception:
-                pass
-
-    return None
-
-async def solve_question(question_text):
-    clean_question = extract_real_question(question_text)
-    if not clean_question:
-        return None
-        
-    print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
-    print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
-
-    ans_gemini = await ask_gemini_api(clean_question)
-    if ans_gemini:
-        print(f"✅ [KẾT QUẢ GEMINI AI]: {ans_gemini}\n============================================================\n", flush=True)
-        return ans_gemini
-
-    ans_wiki = await query_fandom_infobox_api(clean_question)
-    if ans_wiki:
-        print(f"✅ [KẾT QUẢ ANIME WIKI API]: {ans_wiki}\n============================================================\n", flush=True)
-        return ans_wiki
-
-    ans_web = await fetch_anime_web_search(clean_question)
-    if ans_web:
-        print(f"✅ [KẾT QUẢ WEB ANIME SEARCH]: {ans_web}\n============================================================\n", flush=True)
-        return ans_web
-
-    print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
-    return None
-
-@tasks.loop(hours=4, minutes=30)
+@tasks.loop(hours=4, minutes=5)
 async def auto_feed_loop(bot_instance):
     if not IS_FEED_ENABLED:
+        return
+
+    vn_tz = timezone(timedelta(hours=7))
+    current_vn_hour = datetime.now(vn_tz).hour
+    
+    if not (8 <= current_vn_hour < 22):
+        print(f"⏰ [FEED SKIP] Hiện tại là {current_vn_hour}h VN (Ngoài khung giờ 8h-22h). Bỏ qua lượt gửi.", flush=True)
         return
 
     chosen_channel_id = random.choice(FEED_CHANNEL_IDS)
@@ -248,7 +36,9 @@ async def auto_feed_loop(bot_instance):
             if not IS_FEED_ENABLED:
                 return
 
-            await channel.send(".feed")
+            current_vn_hour = datetime.now(vn_tz).hour
+            if 8 <= current_vn_hour < 22:
+                await channel.send(".feed")
             
         except Exception:
             pass
@@ -267,25 +57,6 @@ async def setup_message_listener(bot_instance):
             IS_FEED_ENABLED = True
             await message.reply("🌾 Đã bắt đầu lại vòng lặp tự động gửi `.feed`.")
             return
-
-        if message.channel.id not in FEED_CHANNEL_IDS:
-            return
-
-        if message.author.id == BOT_GAME_ID:
-            question_text = ""
-            if message.embeds:
-                embed = message.embeds[0]
-                question_text = embed.description if embed.description else (embed.title if embed.title else "")
-            else:
-                question_text = message.content
-
-            if question_text:
-                answer = await solve_question(question_text)
-                if answer:
-                    await asyncio.sleep(random.uniform(2.0, 4.0))
-                    await message.reply(answer)
-                else:
-                    print("⚠️ [FEED] Không thể trích xuất được đáp án chính xác.", flush=True)
 
 def start_feed_task(bot):
     asyncio.create_task(setup_message_listener(bot))
