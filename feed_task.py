@@ -50,6 +50,13 @@ def extract_real_question(text):
             
     return None
 
+def extract_subject_name(question_text):
+    text = re.sub(r'(?:có tên là gì|là gì|là ai|như thế nào|ở đâu|nào|\?).*$', '', question_text, flags=re.IGNORECASE).strip()
+    match = re.search(r'(?:của|nhân vật)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,15})', text, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return text
+
 def parse_extracted_phrase(raw_found):
     if not raw_found:
         return None
@@ -72,33 +79,48 @@ def parse_extracted_phrase(raw_found):
     return None
 
 async def query_fandom_infobox_api(clean_question):
-    char_match = re.search(r'(?:của|nhân vật)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_question, re.IGNORECASE)
-    search_target = char_match.group(1).strip() if char_match else clean_question
-    
-    encoded_target = urllib.parse.quote(search_target)
+    subject = extract_subject_name(clean_question)
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-    fandom_endpoints = [
-        f"https://genshin-impact.fandom.com/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json",
-        f"https://genshin-impact.fandom.com/vi/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json",
-        f"https://umamusume.fandom.com/api.php?action=parse&page={encoded_target}&prop=wikitext&format=json"
+    print(f"🌐 [ANIME WIKI API] Đang quét trực tiếp Infobox Fandom cho: {subject}...", flush=True)
+
+    fandom_sites = [
+        "https://genshin-impact.fandom.com",
+        "https://genshin-impact.fandom.com/vi",
+        "https://umamusume.fandom.com"
     ]
 
-    print(f"🌐 [ANIME WIKI API] Đang quét trực tiếp Infobox Fandom cho: {search_target}...", flush=True)
-
     async with aiohttp.ClientSession() as session:
-        for url in fandom_endpoints:
+        for site in fandom_sites:
             try:
-                async with session.get(url, headers=headers, timeout=4) as res:
-                    if res.status == 200:
-                        data = await res.json()
-                        wikitext = data.get("parse", {}).get("wikitext", {}).get("*", "")
-                        if wikitext:
-                            dish_match = re.search(r'dish\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE) or re.search(r'món ăn\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
-                            if dish_match:
-                                ans = parse_extracted_phrase(dish_match.group(1))
-                                if ans:
-                                    return ans
+                search_url = f"{site}/api.php?action=query&list=search&srsearch={urllib.parse.quote(subject)}&format=json"
+                async with session.get(search_url, headers=headers, timeout=4) as res:
+                    if res.status != 200:
+                        continue
+                    data = await res.json()
+                    results = data.get("query", {}).get("search", [])
+                    if not results:
+                        continue
+                    
+                    page_title = results[0]["title"]
+                    parse_url = f"{site}/api.php?action=parse&page={urllib.parse.quote(page_title)}&prop=wikitext&format=json"
+                    
+                    async with session.get(parse_url, headers=headers, timeout=4) as parse_res:
+                        if parse_res.status == 200:
+                            pdata = await parse_res.json()
+                            wikitext = pdata.get("parse", {}).get("wikitext", {}).get("*", "")
+                            if wikitext:
+                                dish_match = re.search(r'(?:dish|special_dish|món ăn)\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
+                                if dish_match:
+                                    ans = parse_extracted_phrase(dish_match.group(1))
+                                    if ans:
+                                        return ans
+                                        
+                                school_match = re.search(r'(?:school|academy|trường|học viện)\s*=\s*([^\n|]+)', wikitext, re.IGNORECASE)
+                                if school_match:
+                                    ans = parse_extracted_phrase(school_match.group(1))
+                                    if ans:
+                                        return ans
             except Exception:
                 continue
     return None
@@ -123,7 +145,7 @@ async def fetch_anime_web_search(clean_question):
                         snippet_tag = result.find('a', class_='result__snippet')
                         snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
 
-                        match_pattern = re.search(r'(?:món ăn đặc biệt|special dish|là)\s*[:\s]*([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', snippet_text, re.IGNORECASE)
+                        match_pattern = re.search(r'(?:món ăn đặc biệt|special dish|là|tên là)\s*[:\s]*([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', snippet_text, re.IGNORECASE)
                         if match_pattern:
                             ans = parse_extracted_phrase(match_pattern.group(1))
                             if ans:
