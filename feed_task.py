@@ -18,7 +18,7 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "DAP_API_KEY_OPENROUTER_VAO_DAY_HOAC_O_ENV")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "DAP_API_KEY_GEMINI_VAO_DAY_HOAC_O_ENV")
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -46,10 +46,11 @@ def parse_best_answer(raw_text):
     if not raw_text:
         return None
         
-    print(f"  ├─ 📄 [AI RAW RESPONSE]: {repr(raw_text)}", flush=True)
+    print(f"  ├─ 📄 [GEMINI RAW RESPONSE]: {repr(raw_text)}", flush=True)
     
     text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
     
+    # Ưu tiên câu trả lời nằm trong ngoặc kép nếu AI vô tình trích dẫn
     quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', text)
     for match in quoted_matches:
         cleaned_quote = clean_final_answer(match)
@@ -81,80 +82,57 @@ def parse_best_answer(raw_text):
         
     return None
 
-async def fetch_free_openrouter_models(session):
-    url = "https://openrouter.ai/api/v1/models"
-    ignored_keywords = ["safety", "guard", "moderation", "embed"]
-    try:
-        async with session.get(url, timeout=5) as res:
-            if res.status == 200:
-                data = await res.json()
-                models_data = data.get("data", [])
-                
-                valid_models = []
-                for m in models_data:
-                    m_id = m.get("id", "").lower()
-                    is_free = m_id.endswith(":free") or (m.get("pricing", {}).get("prompt") == "0" and m.get("pricing", {}).get("completion") == "0")
-                    if is_free and not any(k in m_id for k in ignored_keywords):
-                        valid_models.append(m["id"])
-                
-                if valid_models:
-                    return valid_models[:5]
-    except Exception:
-        pass
-    return ["openrouter/auto"]
-
-async def ask_openrouter_api(clean_question):
-    if not OPENROUTER_API_KEY or "DAP_API_KEY" in OPENROUTER_API_KEY:
-        print("  └─ ⚠️ [OPENROUTER] Chưa nhận diện được API Key hợp lệ.", flush=True)
+async def ask_gemini_api(clean_question):
+    if not GEMINI_API_KEY or "DAP_API_KEY" in GEMINI_API_KEY:
+        print("  └─ ⚠️ [GEMINI] Chưa nhận diện được GEMINI_API_KEY hợp lệ.", flush=True)
         return None
 
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
-        "Content-Type": "application/json"
+    # Sử dụng model Gemini 2.0 Flash tốc độ cao
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY.strip()}"
+    
+    payload = {
+        "system_instruction": {
+            "parts": [
+                {
+                    "text": "Bạn là hệ thống giải đố game trắc nghiệm. Nhiệm vụ duy nhất: Trả lời NGẮN GỌN BẰNG TIẾNG VIỆT chính xác tên entity/đáp án (từ 1 đến 4 từ). KHÔNG giải thích, KHÔNG viết tiếng Anh, KHÔNG chào hỏi, KHÔNG lặp lại câu hỏi."
+                }
+            ]
+        },
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": f"Câu hỏi: {clean_question}\nĐáp án chính xác:"
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 40
+        }
     }
 
-    async with aiohttp.ClientSession() as session:
-        models = await fetch_free_openrouter_models(session)
-        
-        for model in models:
-            payload = {
-                "model": model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "Bạn là hệ thống trả lời câu hỏi trắc nghiệm/đố vui. Nhiệm vụ duy nhất: Trả lời NGẮN GỌN BẰNG TIẾNG VIỆT chính xác tên entity/đáp án (từ 1 đến 4 từ). KHÔNG giải thích, KHÔNG viết tiếng Anh, KHÔNG chào hỏi, KHÔNG lặp lại câu hỏi."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Câu hỏi: {clean_question}\nĐáp án chính xác:"
-                    }
-                ],
-                "temperature": 0.1,
-                "max_tokens": 40
-            }
-            try:
-                print(f"🌐 [OPENROUTER] Thử model '{model}'...", flush=True)
-                async with session.post(url, headers=headers, json=payload, timeout=18) as res:
-                    print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
-                    if res.status == 200:
-                        data = await res.json()
-                        choices = data.get("choices", [])
-                        if choices:
-                            message_obj = choices[0].get("message", {})
-                            raw_text = message_obj.get("content", "")
-                            if not raw_text and "text" in choices[0]:
-                                raw_text = choices[0]["text"]
-                            
-                            if raw_text:
-                                ans = parse_best_answer(raw_text.strip())
-                                if ans:
-                                    return ans
-                    else:
-                        err_text = await res.text()
-                        print(f"  └─ ⚠️ [OPENROUTER ERR BODY]: {err_text[:150]}", flush=True)
-            except Exception as e:
-                print(f"  └─ ❌ [OPENROUTER EXCEPTION]: {type(e).__name__} - {e}", flush=True)
+    try:
+        print("🌐 [GEMINI API] Đang gửi yêu cầu giải đố...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=10) as res:
+                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
+                if res.status == 200:
+                    data = await res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            raw_text = parts[0].get("text", "").strip()
+                            ans = parse_best_answer(raw_text)
+                            if ans:
+                                return ans
+                else:
+                    err_text = await res.text()
+                    print(f"  └─ ⚠️ [GEMINI ERR BODY]: {err_text[:150]}", flush=True)
+    except Exception as e:
+        print(f"  └─ ❌ [GEMINI EXCEPTION]: {type(e).__name__} - {e}", flush=True)
 
     return None
 
@@ -166,10 +144,10 @@ async def solve_question(question_text):
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
 
-    ans_openrouter = await ask_openrouter_api(clean_question)
-    if ans_openrouter:
-        print(f"✅ [KẾT QUẢ OPENROUTER]: {ans_openrouter}\n============================================================\n", flush=True)
-        return ans_openrouter
+    ans_gemini = await ask_gemini_api(clean_question)
+    if ans_gemini:
+        print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
+        return ans_gemini
 
     print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
     return None
