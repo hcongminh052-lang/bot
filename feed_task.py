@@ -18,7 +18,8 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom"]
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom", "wikipedia"]
+STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -49,15 +50,126 @@ def parse_extracted_phrase(raw_found):
     cleaned = clean_final_answer(raw_found)
     cleaned = re.sub(r'^(?:món|món ăn|là|của|tên là|có tên là)\s+', '', cleaned, flags=re.IGNORECASE).strip()
     
+    words = cleaned.split()
+    if not words:
+        return None
+        
+    if words[0].lower() in STOP_WORDS:
+        return None
+        
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
-    words = cleaned.split()
     if 1 <= len(words) <= 5 and len(cleaned) >= 2:
         return cleaned
     elif len(words) > 5:
         return " ".join(words[:3])
         
+    return None
+
+async def fetch_wikipedia_api(clean_question):
+    url = f"https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(clean_question)}&format=json"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        print("🌐 [WIKIPEDIA API] Đang tìm kiếm trên Wikipedia Tiếng Việt...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=4) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    search_results = data.get("query", {}).get("search", [])
+                    for item in search_results:
+                        title = item.get("title", "")
+                        snippet = item.get("snippet", "")
+                        clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+                        
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', clean_snippet)
+                        for match in quoted_matches:
+                            ans = parse_extracted_phrase(match)
+                            if ans:
+                                return ans
+                                
+                        ans = parse_extracted_phrase(title)
+                        if ans:
+                            return ans
+    except Exception:
+        pass
+    return None
+
+async def fetch_anilist_api(clean_question):
+    url = "https://graphql.anilist.co"
+    query = '''
+    query ($search: String) {
+      Media (search: $search, type: ANIME) {
+        title {
+          romaji
+          english
+          native
+        }
+        source
+      }
+    }
+    '''
+    variables = {"search": clean_question}
+    try:
+        print("🌐 [ANILIST API] Đang tra cứu cơ sở dữ liệu AniList...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={'query': query, 'variables': variables}, timeout=4) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    media = data.get("data", {}).get("Media", {})
+                    if media:
+                        titles = media.get("title", {})
+                        for t_key in ["native", "romaji", "english"]:
+                            t_val = titles.get(t_key)
+                            if t_val:
+                                ans = parse_extracted_phrase(t_val)
+                                if ans:
+                                    return ans
+    except Exception:
+        pass
+    return None
+
+async def fetch_jikan_api(clean_question):
+    url = f"https://api.jikan.moe/v4/anime?q={urllib.parse.quote(clean_question)}&limit=3"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        print("🌐 [JIKAN API] Đang tra cứu MyAnimeList (Jikan API)...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=4) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    results = data.get("data", [])
+                    for item in results:
+                        title = item.get("title_japanese") or item.get("title")
+                        ans = parse_extracted_phrase(title)
+                        if ans:
+                            return ans
+    except Exception:
+        pass
+    return None
+
+async def fetch_fandom_api(clean_question):
+    url = f"https://genshin-impact.fandom.com/vi/api.php?action=query&list=search&srsearch={urllib.parse.quote(clean_question)}&format=json"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        print("🌐 [FANDOM API] Đang truy vấn trực tiếp Fandom Wiki...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=4) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    search_results = data.get("query", {}).get("search", [])
+                    for item in search_results:
+                        title = item.get("title", "")
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title)
+                        if quoted_matches:
+                            ans = parse_extracted_phrase(quoted_matches[0])
+                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                return ans
+                        ans = parse_extracted_phrase(title)
+                        if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                            return ans
+    except Exception:
+        pass
     return None
 
 async def fetch_web_search(clean_question):
@@ -68,8 +180,7 @@ async def fetch_web_search(clean_question):
     searx_instances = [
         "https://searx.be/search",
         "https://searx.tiekoetter.com/search",
-        "https://search.mdosch.de/search",
-        "https://searx.roflcopter.fr/search"
+        "https://search.mdosch.de/search"
     ]
     
     print("🌐 [WEB SEARCH] Đang tìm kiếm qua SearxNG JSON & DDG POST...", flush=True)
@@ -149,6 +260,26 @@ async def solve_question(question_text):
         
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
+
+    ans_wiki = await fetch_wikipedia_api(clean_question)
+    if ans_wiki:
+        print(f"✅ [KẾT QUẢ WIKIPEDIA]: {ans_wiki}\n============================================================\n", flush=True)
+        return ans_wiki
+
+    ans_anilist = await fetch_anilist_api(clean_question)
+    if ans_anilist:
+        print(f"✅ [KẾT QUẢ ANILIST]: {ans_anilist}\n============================================================\n", flush=True)
+        return ans_anilist
+
+    ans_jikan = await fetch_jikan_api(clean_question)
+    if ans_jikan:
+        print(f"✅ [KẾT QUẢ JIKAN/MAL]: {ans_jikan}\n============================================================\n", flush=True)
+        return ans_jikan
+
+    ans_fandom = await fetch_fandom_api(clean_question)
+    if ans_fandom:
+        print(f"✅ [KẾT QUẢ FANDOM]: {ans_fandom}\n============================================================\n", flush=True)
+        return ans_fandom
 
     ans_web = await fetch_web_search(clean_question)
     if ans_web:
