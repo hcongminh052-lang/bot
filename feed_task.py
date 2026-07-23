@@ -46,7 +46,7 @@ ELEMENT_NAMES = {
     "băng": "Băng"
 }
 
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "genshin", "impact", "wiki", "fandom", "wikipedia", "lịch sử"]
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia"]
 STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
@@ -92,21 +92,19 @@ def parse_extracted_phrase(raw_found):
     if not words:
         return None
         
-    if words[0].lower() in STOP_WORDS:
-        return None
-        
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
-    if 1 <= len(words) <= 5 and len(cleaned) >= 2:
+    if 1 <= len(words) <= 6 and len(cleaned) >= 2:
         return cleaned
-    elif len(words) > 5:
-        return " ".join(words[:3])
+    elif len(words) > 6:
+        return " ".join(words[:4])
         
     return None
 
 async def ask_gemini_api(clean_question):
     if not GEMINI_API_KEYS:
+        print("⚠️ [GEMINI API] Không tìm thấy API Key hợp lệ trong GEMINI_API_KEYS.", flush=True)
         return None
 
     payload = {
@@ -114,7 +112,7 @@ async def ask_gemini_api(clean_question):
             {
                 "parts": [
                     {
-                        "text": f"Trả lời duy nhất TÊN ĐÁP ÁN (1-3 từ) cho câu hỏi đố vui sau. Không viết thêm bất kỳ từ thừa nào: {clean_question}"
+                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa, câu dẫn, hay dấu chấm câu nào."
                     }
                 ]
             }
@@ -141,14 +139,40 @@ async def ask_gemini_api(clean_question):
                                 parts = candidates[0].get("content", {}).get("parts", [])
                                 if parts:
                                     raw_text = parts[0].get("text", "").strip()
-                                    ans = parse_extracted_phrase(raw_text)
+                                    ans = clean_final_answer(raw_text)
                                     if ans:
                                         return ans
-                        elif res.status == 429:
-                            continue
-            except Exception:
-                pass
+                        else:
+                            print(f"⚠️ [GEMINI API] Key #{key_index} Model {model} trả về lỗi HTTP status: {res.status}", flush=True)
+            except Exception as e:
+                print(f"❌ [GEMINI API ERROR]: {e}", flush=True)
 
+    return None
+
+async def fetch_wikipedia_api(clean_question):
+    keywords = re.sub(r'^(?:cho tôi biết|bạn có biết|hãy cho biết|từng|đã)\s+', '', clean_question, flags=re.IGNORECASE)
+    search_q = urllib.parse.quote(keywords)
+    url = f"https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch={search_q}&format=json"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    
+    try:
+        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia Tiếng Việt...", flush=True)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=4) as res:
+                if res.status == 200:
+                    data = await res.json()
+                    search_results = data.get("query", {}).get("search", [])
+                    for item in search_results:
+                        snippet = item.get("snippet", "")
+                        clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+                        
+                        match = re.search(r'(?:học viện|trường|tại)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', clean_snippet, re.IGNORECASE)
+                        if match:
+                            ans = parse_extracted_phrase(match.group(0))
+                            if ans:
+                                return ans
+    except Exception:
+        pass
     return None
 
 async def fetch_web_search(clean_question):
@@ -156,8 +180,7 @@ async def fetch_web_search(clean_question):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
     }
     
-    keywords = re.sub(r'^(?:người dân|cho tôi biết|bạn có biết|hãy cho biết)\s+', '', clean_question, flags=re.IGNORECASE)
-    search_q = f"{keywords} wiki genshin"
+    search_q = clean_question
 
     searx_instances = [
         "https://searx.be/search",
@@ -165,7 +188,7 @@ async def fetch_web_search(clean_question):
         "https://search.mdosch.de/search"
     ]
     
-    print("🌐 [WEB SEARCH] Đang tìm kiếm từ web...", flush=True)
+    print("🌐 [WEB SEARCH] Đang tìm kiếm tổng hợp trên Web...", flush=True)
     async with aiohttp.ClientSession() as session:
         for instance in searx_instances:
             try:
@@ -178,14 +201,10 @@ async def fetch_web_search(clean_question):
                             snippet_text = result.get("content", "")
                             title_text = result.get("title", "")
 
-                            for elem_key, elem_name in ELEMENT_NAMES.items():
-                                if f"nguyên tố {elem_key}" in snippet_text.lower() or f"thần {elem_key}" in snippet_text.lower():
-                                    return elem_name
-
-                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
+                            quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
                             for match in quoted_matches:
                                 ans = parse_extracted_phrase(match)
-                                if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                                if ans:
                                     return ans
             except Exception:
                 continue
@@ -201,17 +220,13 @@ async def fetch_web_search(clean_question):
                         snippet_tag = result.find('a', class_='result__snippet')
                         snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
                         
-                        for elem_key, elem_name in ELEMENT_NAMES.items():
-                            if f"nguyên tố {elem_key}" in snippet_text.lower() or f"thần {elem_key}" in snippet_text.lower():
-                                return elem_name
-
                         title_tag = result.find('a', class_='result__title')
                         title_text = title_tag.get_text().strip() if title_tag else ""
                         
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text)
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
                         for match in quoted_matches:
                             ans = parse_extracted_phrase(match)
-                            if ans and ans.lower() not in ["genshin impact", "furina", "fandom", "wiki"]:
+                            if ans:
                                 return ans
         except Exception:
             pass
@@ -235,6 +250,11 @@ async def solve_question(question_text):
     if ans_gemini:
         print(f"✅ [KẾT QUẢ GEMINI AI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
+
+    ans_wiki = await fetch_wikipedia_api(clean_question)
+    if ans_wiki:
+        print(f"✅ [KẾT QUẢ WIKIPEDIA]: {ans_wiki}\n============================================================\n", flush=True)
+        return ans_wiki
 
     ans_web = await fetch_web_search(clean_question)
     if ans_web:
