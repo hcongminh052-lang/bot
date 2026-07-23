@@ -18,18 +18,39 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-DEFAULT_KEYS = "AQ.Ab8RN6JhfU1IlDhs0UNCTJ3mgquJO9dJ5ZkWvJnylt2uH_lvwg, AQ.Ab8RN6J5Bt7pWbBmjGrSQzahbDdpYNBb34povPscYHIFhKg62A, AQ.Ab8RN6Jr_iO3darmmR2vZpxrWTlbEBrAfwx920oxJo-z18DG7A"
-GEMINI_KEYS_RAW = os.getenv("GEMINI_API_KEYS", DEFAULT_KEYS)
-GEMINI_API_KEYS = [k.strip() for k in GEMINI_KEYS_RAW.split(",") if k.strip() and "KEY1" not in k and "KEY2" not in k]
-
-FALLBACK_GEMINI_MODELS = [
-    "models/gemini-2.0-flash",
-    "models/gemini-1.5-flash",
-    "models/gemini-1.5-flash-8b",
-    "models/gemini-1.5-pro"
+GEMINI_API_KEYS = [
+    "AQ.Ab8RN6JQkx441gc__6_N4MSLC1wPM_O44nFxP1JHjwyhK--0Cg",
+    "AQ.Ab8RN6KAGqai-T7w4RbG7qD66Q8aw3Vx5r_9EpCm-iT2cX_HCA",
+    "AQ.Ab8RN6I-7F8O9ISDIkN2BKt9zHZnP_4k3nmzIKu4uXp7mhcx3Q"
 ]
 
-BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia", "big three", "heisei"]
+GEMINI_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+]
+
+GENSHIN_CHAR_ELEMENTS = {
+    "thủy": ["furina", "neuvillette", "yelan", "xingqiu", "barbara", "kokomi", "nilou", "mona", "ayato", "tartaglia", "childe", "candace", "sigewinne", "mualani"],
+    "nham": ["zhongli", "ningguang", "albedo", "itto", "navia", "chiori", "noelle", "yun jin", "gorou", "kachina"],
+    "phong": ["venti", "kazuha", "sucrose", "jean", "xiao", "wanderer", "heizou", "sayu", "xianyun", "faruzan", "lynette"],
+    "lôi": ["raiden", "ei", "shogun", "yae", "fischl", "beidou", "keqing", "cyno", "kuki", "clorinde", "sethos", "dori", "lisa", "razor", "sara", "ororon"],
+    "thảo": ["nahida", "alhaitham", "baizhu", "tighnari", "collei", "yaoyao", "kaveh", "emilie", "kinich", "kirara"],
+    "hỏa": ["hu tao", "diluc", "xiangling", "bennett", "yoimiya", "arlecchino", "gaming", "lyney", "dehya", "mavuika", "klee", "yanfei", "thoma", "amber", "xinyan", "chevreuse"],
+    "băng": ["ganyu", "ayaka", "shenhe", "eula", "wriothesley", "rosaria", "layla", "diona", "charlotte", "citlali", "chongyun", "qiqi", "aloy", "freminet", "mika"]
+}
+
+ELEMENT_NAMES = {
+    "thủy": "Thủy",
+    "nham": "Nham",
+    "phong": "Phong",
+    "lôi": "Lôi",
+    "thảo": "Thảo",
+    "hỏa": "Hỏa",
+    "băng": "Băng"
+}
+
+BAD_WORDS = ["nhân v", "nhân vật", "hình ảnh", "kết quả", "trả lời", "câu hỏi", "thông tin", "được biết", "xem thêm", "wiki", "fandom", "wikipedia"]
+STOP_WORDS = {"đã", "được", "có", "không", "như", "là", "những", "một", "với", "cho", "trong", "về", "đang", "sẽ", "khi", "bằng", "các", "theo"}
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -54,6 +75,15 @@ def extract_real_question(text):
             
     return None
 
+def solve_genshin_local(clean_question):
+    q_lower = clean_question.lower()
+    if "nguyên tố" in q_lower or "thần" in q_lower or "cai quản" in q_lower:
+        for elem_key, char_list in GENSHIN_CHAR_ELEMENTS.items():
+            for char in char_list:
+                if char in q_lower:
+                    return ELEMENT_NAMES[elem_key]
+    return None
+
 def parse_extracted_phrase(raw_found):
     if not raw_found:
         return None
@@ -68,35 +98,15 @@ def parse_extracted_phrase(raw_found):
     if any(bad in cleaned.lower() for bad in BAD_WORDS):
         return None
 
-    if 1 <= len(words) <= 5 and len(cleaned) >= 2:
+    if 1 <= len(words) <= 6 and len(cleaned) >= 2:
         return cleaned
-    elif len(words) > 5:
-        return " ".join(words[:3])
+    elif len(words) > 6:
+        return " ".join(words[:4])
         
     return None
 
-async def fetch_allowed_gemini_models(session, api_key):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    try:
-        async with session.get(url, timeout=5) as res:
-            if res.status == 200:
-                data = await res.json()
-                valid_models = []
-                for m in data.get("models", []):
-                    methods = m.get("supportedGenerationMethods", [])
-                    if "generateContent" in methods:
-                        model_name = m.get("name", "")
-                        if model_name:
-                            valid_models.append(model_name)
-                if valid_models:
-                    return valid_models
-    except Exception:
-        pass
-    return FALLBACK_GEMINI_MODELS
-
 async def ask_gemini_api(clean_question):
     if not GEMINI_API_KEYS:
-        print("⚠️ [GEMINI API] Không tìm thấy API Key nào trong danh sách.", flush=True)
         return None
 
     payload = {
@@ -104,7 +114,7 @@ async def ask_gemini_api(clean_question):
             {
                 "parts": [
                     {
-                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy suy luận chính xác và trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
+                        "text": f"Đây là câu hỏi đố vui: '{clean_question}'. Hãy trả lời CHÍNH XÁC duy nhất TÊN CỦA ĐÁP ÁN (từ 1 đến 4 từ). Không viết thêm bất kỳ từ thừa nào."
                     }
                 ]
             }
@@ -115,18 +125,19 @@ async def ask_gemini_api(clean_question):
         }
     }
 
-    headers = {"Content-Type": "application/json"}
+    for key_index, token in enumerate(GEMINI_API_KEYS, start=1):
+        for model in GEMINI_MODELS:
+            headers = {"Content-Type": "application/json"}
+            
+            if token.startswith("AIzaSy"):
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={token}"
+            else:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                headers["Authorization"] = f"Bearer {token}"
 
-    async with aiohttp.ClientSession() as session:
-        for key_index, api_key in enumerate(GEMINI_API_KEYS, start=1):
-            allowed_models = await fetch_allowed_gemini_models(session, api_key)
-            print(f"📋 [GEMINI API] Key #{key_index} phát hiện {len(allowed_models)} mô hình khả dụng.", flush=True)
-
-            for model_path in allowed_models:
-                formatted_model = model_path if model_path.startswith("models/") else f"models/{model_path}"
-                url = f"https://generativelanguage.googleapis.com/v1beta/{formatted_model}:generateContent?key={api_key}"
-                try:
-                    print(f"🌐 [GEMINI API] Thử Key #{key_index} - Model {formatted_model}...", flush=True)
+            try:
+                print(f"🌐 [GEMINI API] Thử Key/Token #{key_index} - Model {model}...", flush=True)
+                async with aiohttp.ClientSession() as session:
                     async with session.post(url, json=payload, headers=headers, timeout=6) as res:
                         if res.status == 200:
                             data = await res.json()
@@ -139,10 +150,9 @@ async def ask_gemini_api(clean_question):
                                     if ans:
                                         return ans
                         else:
-                            err_body = await res.text()
-                            print(f"⚠️ [GEMINI API] Lỗi HTTP {res.status}: {err_body[:100]}", flush=True)
-                except Exception as e:
-                    print(f"❌ [GEMINI API ERROR]: {e}", flush=True)
+                            print(f"⚠️ [GEMINI API] Token #{key_index} Model {model} trả về lỗi HTTP status: {res.status}", flush=True)
+            except Exception as e:
+                print(f"❌ [GEMINI API ERROR]: {e}", flush=True)
 
     return None
 
@@ -153,7 +163,7 @@ async def fetch_wikipedia_api(clean_question):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     
     try:
-        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia...", flush=True)
+        print("🌐 [WIKIPEDIA API] Đang tra cứu Wikipedia Tiếng Việt...", flush=True)
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=4) as res:
                 if res.status == 200:
@@ -163,7 +173,7 @@ async def fetch_wikipedia_api(clean_question):
                         snippet = item.get("snippet", "")
                         clean_snippet = re.sub(r'<[^>]+>', '', snippet)
                         
-                        match = re.search(r'(?:học viện|trường|món ăn)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,20})', clean_snippet, re.IGNORECASE)
+                        match = re.search(r'(?:học viện|trường|tại)\s+([A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠa-zA-Z0-9\s]{2,25})', clean_snippet, re.IGNORECASE)
                         if match:
                             ans = parse_extracted_phrase(match.group(0))
                             if ans:
@@ -197,7 +207,7 @@ async def fetch_web_search(clean_question):
                         for result in results:
                             snippet_text = result.get("content", "")
                             title_text = result.get("title", "")
-                            
+
                             quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
                             for match in quoted_matches:
                                 ans = parse_extracted_phrase(match)
@@ -217,7 +227,10 @@ async def fetch_web_search(clean_question):
                         snippet_tag = result.find('a', class_='result__snippet')
                         snippet_text = snippet_tag.get_text().strip() if snippet_tag else ""
                         
-                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', snippet_text)
+                        title_tag = result.find('a', class_='result__title')
+                        title_text = title_tag.get_text().strip() if title_tag else ""
+                        
+                        quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', title_text + " " + snippet_text)
                         for match in quoted_matches:
                             ans = parse_extracted_phrase(match)
                             if ans:
@@ -234,6 +247,11 @@ async def solve_question(question_text):
         
     print(f"\n==================== [ BẮT ĐẦU GIẢI ĐỐ ] ====================", flush=True)
     print(f"🔍 [SEARCH] Câu hỏi đã trích xuất: {clean_question}", flush=True)
+
+    ans_local = solve_genshin_local(clean_question)
+    if ans_local:
+        print(f"✅ [KẾT QUẢ GENSHIN LOCAL]: {ans_local}\n============================================================\n", flush=True)
+        return ans_local
 
     ans_gemini = await ask_gemini_api(clean_question)
     if ans_gemini:
