@@ -18,7 +18,20 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "DAP_API_KEY_GEMINI_VAO_DAY_HOAC_O_ENV")
+
+# Thêm danh sách API Keys vào đây, phân cách bằng dấu phẩy
+GEMINI_KEYS_RAW = os.getenv("GEMINI_API_KEYS", "AIzaSy_KEY1, AIzaSy_KEY2, AIzaSy_KEY3")
+GEMINI_API_KEYS = [k.strip() for k in GEMINI_KEYS_RAW.split(",") if k.strip() and "KEY" not in k]
+
+# Danh sách các model Free có quỹ quota riêng biệt
+GEMINI_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b"
+]
+
+# Bộ nhớ tạm lưu đáp án đã từng giải để tránh gọi lại API khi trùng câu hỏi
+ANSWER_CACHE = {}
 
 def clean_final_answer(text):
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
@@ -50,7 +63,6 @@ def parse_best_answer(raw_text):
     
     text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
     
-    # Ưu tiên câu trả lời nằm trong ngoặc kép nếu AI vô tình trích dẫn
     quoted_matches = re.findall(r'["\'«“](.*?)["\'»”]', text)
     for match in quoted_matches:
         cleaned_quote = clean_final_answer(match)
@@ -83,18 +95,20 @@ def parse_best_answer(raw_text):
     return None
 
 async def ask_gemini_api(clean_question):
-    if not GEMINI_API_KEY or "DAP_API_KEY" in GEMINI_API_KEY:
-        print("  └─ ⚠️ [GEMINI] Chưa nhận diện được GEMINI_API_KEY hợp lệ.", flush=True)
+    if not GEMINI_API_KEYS:
+        print("  └─ ⚠️ [GEMINI] Chưa cấu hình danh sách GEMINI_API_KEYS.", flush=True)
         return None
 
-    # Sử dụng model Gemini 2.0 Flash tốc độ cao
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY.strip()}"
-    
+    # Kiểm tra trong cache trước
+    if clean_question in ANSWER_CACHE:
+        print(f"  ├─ ⚡ [CACHE HIT]: Lấy đáp án từ bộ nhớ tạm -> {ANSWER_CACHE[clean_question]}", flush=True)
+        return ANSWER_CACHE[clean_question]
+
     payload = {
         "system_instruction": {
             "parts": [
                 {
-                    "text": "Bạn là hệ thống giải đố game trắc nghiệm. Nhiệm vụ duy nhất: Trả lời NGẮN GỌN BẰNG TIẾNG VIỆT chính xác tên entity/đáp án (từ 1 đến 4 từ). KHÔNG giải thích, KHÔNG viết tiếng Anh, KHÔNG chào hỏi, KHÔNG lặp lại câu hỏi."
+                    "text": "Bạn là hệ thống giải đố trắc nghiệm. Nhiệm vụ duy nhất: Trả lời NGẮN GỌN BẰNG TIẾNG VIỆT chính xác tên entity/đáp án (từ 1 đến 4 từ). KHÔNG giải thích, KHÔNG viết tiếng Anh, KHÔNG chào hỏi, KHÔNG lặp lại câu hỏi."
                 }
             ]
         },
@@ -113,26 +127,43 @@ async def ask_gemini_api(clean_question):
         }
     }
 
-    try:
-        print("🌐 [GEMINI API] Đang gửi yêu cầu giải đố...", flush=True)
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=10) as res:
-                print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
-                if res.status == 200:
-                    data = await res.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            raw_text = parts[0].get("text", "").strip()
-                            ans = parse_best_answer(raw_text)
-                            if ans:
-                                return ans
-                else:
-                    err_text = await res.text()
-                    print(f"  └─ ⚠️ [GEMINI ERR BODY]: {err_text[:150]}", flush=True)
-    except Exception as e:
-        print(f"  └─ ❌ [GEMINI EXCEPTION]: {type(e).__name__} - {e}", flush=True)
+    # Thử lần lượt qua từng Key và từng Model
+    for key_idx, api_key in enumerate(GEMINI_API_KEYS, start=1):
+        for model in GEMINI_MODELS:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            
+            # Thực hiện retry tối đa 3 lần nếu dính lỗi 429
+            for retry in range(3):
+                try:
+                    print(f"🌐 [GEMINI API] Key #{key_idx} | Model: {model} | Retry: {retry}", flush=True)
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(url, json=payload, timeout=10) as res:
+                            print(f"  ├─ 📥 [HTTP STATUS]: {res.status}", flush=True)
+                            
+                            if res.status == 200:
+                                data = await res.json()
+                                candidates = data.get("candidates", [])
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts", [])
+                                    if parts:
+                                        raw_text = parts[0].get("text", "").strip()
+                                        ans = parse_best_answer(raw_text)
+                                        if ans:
+                                            ANSWER_CACHE[clean_question] = ans
+                                            return ans
+                            elif res.status == 429:
+                                wait_time = (2 ** retry) + random.uniform(0.5, 1.5)
+                                print(f"  ├─ ⚠️ [RATE LIMIT 429]: Chờ {wait_time:.1f}s trước khi đổi key/thử lại...", flush=True)
+                                await asyncio.sleep(wait_time)
+                                if retry == 2:
+                                    break # Hết lượt retry cho model này, sang model/key tiếp theo
+                            else:
+                                err_text = await res.text()
+                                print(f"  └─ ⚠️ [GEMINI ERR BODY]: {err_text[:150]}", flush=True)
+                                break
+                except Exception as e:
+                    print(f"  └─ ❌ [GEMINI EXCEPTION]: {type(e).__name__} - {e}", flush=True)
+                    break
 
     return None
 
@@ -149,7 +180,7 @@ async def solve_question(question_text):
         print(f"✅ [KẾT QUẢ GEMINI]: {ans_gemini}\n============================================================\n", flush=True)
         return ans_gemini
 
-    print("❌ [KẾT QUẢ]: Thất bại toàn bộ các nguồn.\n============================================================\n", flush=True)
+    print("❌ [KẾT QUẢ]: Thất bại do toàn bộ API Key/Model đều dính Limit.\n============================================================\n", flush=True)
     return None
 
 @tasks.loop(hours=4, minutes=30)
