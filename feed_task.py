@@ -11,28 +11,10 @@ FEED_CHANNEL_IDS = [
 ]
 
 IS_FEED_ENABLED = True
-
-def get_next_feed_delay():
-    vn_tz = timezone(timedelta(hours=7))
-    now = datetime.now(vn_tz)
-    
-    today_8am = now.replace(hour=8, minute=0, second=0, microsecond=0)
-    
-    schedule = [
-        today_8am,
-        today_8am + timedelta(hours=4, minutes=30),
-        today_8am + timedelta(hours=9),
-        today_8am + timedelta(hours=13, minutes=30)
-    ]
-    
-    for slot in schedule:
-        if now < slot:
-            return (slot - now).total_seconds()
-            
-    tomorrow_8am = today_8am + timedelta(days=1)
-    return (tomorrow_8am - now).total_seconds()
+LAST_FEED_TIME = None
 
 async def send_feed_message(bot_instance):
+    global LAST_FEED_TIME
     if not IS_FEED_ENABLED:
         return
 
@@ -44,35 +26,44 @@ async def send_feed_message(bot_instance):
 
     if channel:
         try:
-            extra_wait = random.randint(3, 10)
+            extra_wait = random.randint(3, 15)
             await asyncio.sleep(extra_wait)
             
             if IS_FEED_ENABLED:
                 await channel.send(".feed")
-                print("🌾 [FEED] Đã gửi thành công .feed", flush=True)
+                vn_tz = timezone(timedelta(hours=7))
+                LAST_FEED_TIME = datetime.now(vn_tz)
+                print(f"🌾 [FEED SUCCESS] Đã gửi .feed lúc {LAST_FEED_TIME.strftime('%H:%M:%S')}", flush=True)
         except Exception as e:
             print("❌ [FEED ERROR]:", e, flush=True)
 
-async def feed_scheduler_loop(bot_instance):
-    await bot_instance.wait_until_ready()
-    
+@tasks.loop(minutes=1)
+async def feed_checker_loop(bot_instance):
+    global LAST_FEED_TIME
+    if not IS_FEED_ENABLED:
+        return
+
     vn_tz = timezone(timedelta(hours=7))
     now = datetime.now(vn_tz)
-    
-    if 8 <= now.hour < 22:
-        print("🚀 Khởi động bot trong khung giờ hoạt động (8h-22h), thực hiện gửi .feed ngay...", flush=True)
+
+    if not (8 <= now.hour < 22):
+        return
+
+    if LAST_FEED_TIME is None:
+        print("🚀 [FEED START] Lần đầu chạy trong khung 8h-22h, thực hiện gửi ngay...", flush=True)
         await send_feed_message(bot_instance)
+        return
+
+    elapsed_seconds = (now - LAST_FEED_TIME).total_seconds()
     
-    while True:
-        delay = get_next_feed_delay()
-        print(f"⏰ [FEED SCHEDULER] Chờ {delay:.0f}s cho lượt gửi tiếp theo...", flush=True)
-        await asyncio.sleep(delay)
+    if elapsed_seconds >= 16200:
+        print(f"⏰ [FEED TRIGGER] Đã trôi qua {elapsed_seconds/3600:.2f} tiếng kể từ lượt trước. Đang gửi lại...", flush=True)
         await send_feed_message(bot_instance)
 
 async def setup_message_listener(bot_instance):
     @bot_instance.listen('on_message')
     async def handle_feed_commands(message):
-        global IS_FEED_ENABLED
+        global IS_FEED_ENABLED, LAST_FEED_TIME
 
         if message.content == "!feed off":
             IS_FEED_ENABLED = False
@@ -84,6 +75,16 @@ async def setup_message_listener(bot_instance):
             await message.reply("🌾 Đã bắt đầu lại vòng lặp tự động gửi `.feed`.")
             return
 
+        if message.author.id == bot_instance.user.id and message.content == ".feed":
+            vn_tz = timezone(timedelta(hours=7))
+            LAST_FEED_TIME = datetime.now(vn_tz)
+
 def start_feed_task(bot):
     asyncio.create_task(setup_message_listener(bot))
-    asyncio.create_task(feed_scheduler_loop(bot))
+    
+    @feed_checker_loop.before_loop
+    async def before_feed_checker():
+        await bot.wait_until_ready()
+        
+    if not feed_checker_loop.is_running():
+        feed_checker_loop.start(bot)
