@@ -25,8 +25,11 @@ async def auto_feed_loop(bot_instance):
         return
 
     chosen_channel_id = random.choice(FEED_CHANNEL_IDS)
-    channel = bot_instance.get_channel(chosen_channel_id)
-    
+    try:
+        channel = bot_instance.get_channel(chosen_channel_id) or await bot_instance.fetch_channel(chosen_channel_id)
+    except Exception:
+        channel = None
+
     if channel:
         try:
             if auto_feed_loop.current_loop > 0:
@@ -64,6 +67,14 @@ def start_feed_task(bot):
     @auto_feed_loop.before_loop
     async def before_auto_feed():
         await bot.wait_until_ready()
+        
+        vn_tz = timezone(timedelta(hours=7))
+        now = datetime.now(vn_tz)
+        if now.hour < 8:
+            target_8am = now.replace(hour=8, minute=0, second=0, microsecond=0)
+            wait_seconds = (target_8am - now).total_seconds()
+            print(f"⏰ Chờ {wait_seconds:.0f}s cho đến đúng 8:00 sáng VN...", flush=True)
+            await asyncio.sleep(wait_seconds)
         
     if not auto_feed_loop.is_running():
         auto_feed_loop.start(bot)
