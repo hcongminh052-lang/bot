@@ -12,7 +12,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 LAST_FEED_TIME = None
-INTERVAL_SECONDS = 4 * 3600 + 5 * 60
+INTERVAL_SECONDS = 5 * 3600
 
 async def send_feed_message(bot_instance):
     global LAST_FEED_TIME
