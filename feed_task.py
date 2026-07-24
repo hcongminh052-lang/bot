@@ -12,6 +12,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 LAST_FEED_TIME = None
+INTERVAL_SECONDS = 4 * 3600 + 5 * 60
 
 async def send_feed_message(bot_instance):
     global LAST_FEED_TIME
@@ -26,7 +27,7 @@ async def send_feed_message(bot_instance):
 
     if channel:
         try:
-            extra_wait = random.randint(3, 15)
+            extra_wait = random.randint(3, 10)
             await asyncio.sleep(extra_wait)
             
             if IS_FEED_ENABLED:
@@ -50,14 +51,18 @@ async def feed_checker_loop(bot_instance):
         return
 
     if LAST_FEED_TIME is None:
-        print("🚀 [FEED START] Lần đầu chạy trong khung 8h-22h, thực hiện gửi ngay...", flush=True)
+        print("🚀 [FEED START] Khởi động bot trong khung giờ 8h-22h, thực hiện gửi lượt đầu tiên...", flush=True)
+        await send_feed_message(bot_instance)
+        return
+
+    if LAST_FEED_TIME.day != now.day and now.hour >= 8:
+        print("🌅 [FEED NEW DAY] Đã sang ngày mới (sau 8h sáng), kích hoạt lượt feed đầu tiên...", flush=True)
         await send_feed_message(bot_instance)
         return
 
     elapsed_seconds = (now - LAST_FEED_TIME).total_seconds()
-    
-    if elapsed_seconds >= 16200:
-        print(f"⏰ [FEED TRIGGER] Đã trôi qua {elapsed_seconds/3600:.2f} tiếng kể từ lượt trước. Đang gửi lại...", flush=True)
+    if elapsed_seconds >= INTERVAL_SECONDS:
+        print(f"⏰ [FEED TRIGGER] Đã đủ chu kỳ 4 tiếng 5 phút ({elapsed_seconds/60:.1f} phút). Đang gửi tiếp...", flush=True)
         await send_feed_message(bot_instance)
 
 async def setup_message_listener(bot_instance):
