@@ -10,15 +10,6 @@ FEED_CHANNEL_IDS = [
     1292304060342603840
 ]
 
-import asyncio
-import random
-from datetime import datetime, timezone, timedelta
-import discord
-
-FEED_CHANNEL_IDS = [
-    1292304060342603840
-]
-
 IS_FEED_ENABLED = True
 
 def get_next_feed_delay():
