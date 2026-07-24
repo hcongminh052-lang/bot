@@ -12,7 +12,7 @@ FEED_CHANNEL_IDS = [
 
 IS_FEED_ENABLED = True
 
-@tasks.loop(hours=4, minutes=30)
+@tasks.loop(hours=4, minutes=5)
 async def auto_feed_loop(bot_instance):
     if not IS_FEED_ENABLED:
         return
