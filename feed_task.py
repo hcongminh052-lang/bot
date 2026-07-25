@@ -13,7 +13,7 @@ FEED_CHANNEL_IDS = [
 IS_FEED_ENABLED = True
 LAST_FEED_TIME = None
 
-# SỬA LẠI: 4 tiếng 5 phút = 14,700 giây
+# Chu kỳ: 4 tiếng 5 phút = 14,700 giây
 INTERVAL_SECONDS = 4 * 3600 + 5 * 60  
 
 async def send_feed_message(bot_instance):
@@ -30,7 +30,6 @@ async def send_feed_message(bot_instance):
 
     if channel:
         try:
-            # Chờ ngẫu nhiên 3-10s để giả lập thao tác người dùng
             extra_wait = random.randint(3, 10)
             await asyncio.sleep(extra_wait)
             
@@ -51,23 +50,23 @@ async def feed_checker_loop(bot_instance):
     vn_tz = timezone(timedelta(hours=7))
     now = datetime.now(vn_tz)
 
-    # 1. Kiểm tra khung giờ hoạt động (Chỉ chạy từ 8h00 đến trước 22h00)
+    # 1. Khung giờ hoạt động từ 8h00 đến trước 22h00
     if not (8 <= now.hour < 22):
         return
 
-    # 2. Trường hợp vừa bật Bot lần đầu trong ngày
+    # 2. Trường hợp khởi động lần đầu hoặc mốc thời gian chưa có
     if LAST_FEED_TIME is None:
         print("🚀 [FEED START] Khởi động bot trong khung giờ 8h-22h, gửi lượt đầu tiên...", flush=True)
         await send_feed_message(bot_instance)
         return
 
-    # 3. Trường hợp sang ngày mới (Sau 8h sáng)
+    # 3. Sang ngày mới (Sau 8h sáng)
     if LAST_FEED_TIME.day != now.day and now.hour >= 8:
         print("🌅 [FEED NEW DAY] Đã sang ngày mới (sau 8h sáng), gửi lượt đầu tiên...", flush=True)
         await send_feed_message(bot_instance)
         return
 
-    # 4. Kiểm tra xem đã đủ 4 tiếng 5 phút kể từ lần gửi trước chưa
+    # 4. Kiểm tra đủ chu kỳ 4 tiếng 5 phút
     elapsed_seconds = (now - LAST_FEED_TIME).total_seconds()
     if elapsed_seconds >= INTERVAL_SECONDS:
         mins = int(elapsed_seconds // 60)
@@ -89,8 +88,8 @@ async def setup_message_listener(bot_instance):
             await message.reply("🌾 Đã bắt đầu lại vòng lặp tự động gửi `.feed`.")
             return
 
-        # Cập nhật LAST_FEED_TIME nếu chính bot hoặc người dùng tự gửi lệnh .feed
-        if message.content == ".feed":
+        # SỬA LẠI: Chỉ cập nhật LAST_FEED_TIME khi CHÍNH BOT này tự tay gõ .feed thủ công
+        if message.author.id == bot_instance.user.id and message.content == ".feed":
             vn_tz = timezone(timedelta(hours=7))
             LAST_FEED_TIME = datetime.now(vn_tz)
 
