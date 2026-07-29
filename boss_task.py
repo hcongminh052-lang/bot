@@ -15,28 +15,30 @@ def start_boss_task(bot):
         if message.author.id != TARGET_BOT_ID:
             return
 
-        # 2. Kiểm tra khung giờ (12h và 19h)
+        # 2. Kiểm tra khung giờ (chỉ hoạt động lúc 12h và 19h)
         vn_tz = timezone(timedelta(hours=7))
         now = datetime.now(vn_tz)
         
         if now.hour not in [12, 19]:
             return
 
-        # 3. Tìm và bấm nút
-        if message.components:
-            for row in message.components:
+        # 3. Sử dụng getattr an toàn để không bị lỗi 'components'
+        components = getattr(message, 'components', [])
+        if components:
+            for row in components:
                 children = getattr(row, 'children', [])
                 for component in children:
                     label = getattr(component, 'label', '') or ''
                     emoji = getattr(component, 'emoji', None)
                     emoji_name = emoji.name if emoji else ''
 
+                    # Bấm nút nếu có chữ "Đánh Boss" hoặc icon ⚔️
                     if "Đánh Boss" in label or "⚔️" in emoji_name:
                         try:
                             await component.click()
-                            print(f"[{now.strftime('%H:%M:%S')}] ⚔️ Đã đánh boss tại kênh: {message.channel.name}")
+                            print(f"[{now.strftime('%H:%M:%S')}] ⚔️ Đã đánh boss tại kênh: {message.channel.name}", flush=True)
                             await asyncio.sleep(0.5)
                         except Exception as e:
-                            print(f"❌ Lỗi nhấn nút: {e}")
+                            print(f"❌ Lỗi nhấn nút: {e}", flush=True)
                             
-    print("⚔️ [HỆ THỐNG] Module Tự động Đánh Boss đã được tải.")
+    print("⚔️ [HỆ THỐNG] Module Tự động Đánh Boss đã được tải.", flush=True)
