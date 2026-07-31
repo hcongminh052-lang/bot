@@ -13,7 +13,7 @@ from feed_task import start_feed_task
 from boss_task import start_boss_task # Import file boss_task bạn vừa tạo
 
 prefix = "!"
-intents = discord.Intents.all()
+intents = discord.Intents.default()
 TOKEN = os.getenv("DISCORD_TOKEN")
 bot = commands.Bot(command_prefix=prefix,
                    help_command=None,
