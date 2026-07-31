@@ -5,12 +5,10 @@ import random
 import signal
 import traceback
 import discord
-import voice_task
 from discord.ext import commands
 from keep_alive import keep_alive
-from voice_task import voice_keepalive_loop, check_voice_status
 from feed_task import start_feed_task
-from boss_task import start_boss_task # Import file boss_task bạn vừa tạo
+from boss_task import start_boss_task
 
 prefix = "!"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -29,7 +27,7 @@ def listToString(s):
 @bot.command()
 async def cmd(ctx):
     msg = (
-        "➤ !allchanels | !ac\n"
+        "➤ !allchannels | !ac\n"
         "└ Hiển thị toàn bộ các kênh trong máy chủ.\n\n"
 
         "➤ !showhiddenvoice | !shdv\n"
@@ -54,16 +52,8 @@ async def cmd(ctx):
 async def on_ready():
     print(f'✅ Bot {bot.user} đã lên sóng!')
     
-    # Kiểm tra và chạy loop voice
-    if not voice_keepalive_loop.is_running():
-        voice_keepalive_loop.start(bot)
-        
     start_feed_task(bot)
-    start_boss_task(bot) # Gọi module đánh boss chạy ngầm
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-    await check_voice_status(bot, member, before, after)
+    start_boss_task(bot)
 
 @bot.command()
 async def kao(ctx):
