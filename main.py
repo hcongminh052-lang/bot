@@ -17,7 +17,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 bot = commands.Bot(command_prefix=prefix,
                    help_command=None,
                    case_insensitive=True,
-                   intents=intents,
                    self_bot = True)
 
 def listToString(s):
