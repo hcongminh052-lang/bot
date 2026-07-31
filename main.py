@@ -226,4 +226,4 @@ async def stopexp(ctx):
     print("===== DA DUNG CAY EXP =====")
   
 keep_alive()
-bot.run(TOKEN, bot = False)
+bot.run(TOKEN)
