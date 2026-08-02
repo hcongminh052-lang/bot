@@ -32,7 +32,9 @@ def listToString(s):
 async def exp_farm_loop():
     await bot.wait_until_ready()
     channel_id = 1381302690335952988
-    
+
+    await asyncio.sleep(5)
+  
     while True:
         if farm_exp:
             channel = bot.get_channel(channel_id)
